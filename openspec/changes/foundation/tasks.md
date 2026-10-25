@@ -20,12 +20,12 @@
 
 ## 4. Statement classification
 
-- [ ] 4.1 Define `IStatementClassifier` and its result (category per statement, batch verdict, rejection reasons with positions); verify it compiles and the unit-test harness can run table-driven cases
-- [ ] 4.2 Implement ScriptDom parsing (TSql170Parser), rejecting parse errors and multiple batches separated by `GO`; verify with unit tests for "Syntax error", "Keywords in comments and strings do not count" and a `GO` case
-- [ ] 4.3 Implement the allowlist visitor and per-category allowlists for query, command, ddl and execute, with an unknown node rejecting and naming the element; verify with the classifier table covering "Each category is recognised", "Out-of-scope statements are rejected" and "Unrecognised syntax"
-- [ ] 4.4 Implement the side-effect checks (SELECT INTO, OPENQUERY/OPENROWSET/OPENDATASOURCE, NEXT VALUE FOR, locking hints) and dynamic SQL rejection (EXEC string, sp_executesql); verify with table cases for every scenario in "Side-effecting reads are not queries" and "Dynamic and indirect SQL"
-- [ ] 4.5 Implement batch homogeneity and the tool-to-category check with the "use the X tool" reason; verify with table cases for "Mixed batch", "Homogeneous batch" and "Wrong tool"
-- [ ] 4.6 Grow the query corpus (joins, CTEs, window functions, APPLY, PIVOT/UNPIVOT, JSON/XML functions, FOR SYSTEM_TIME, OPTION hints, TOP/OFFSET-FETCH, UNION/EXCEPT/INTERSECT, subqueries) until each case classifies as query, extending the allowlists only where a test needs it; verify the table passes, and document in ADR-0002's consequences or a `docs/classifier.md` how to add a node type
+- [x] 4.1 Define `IStatementClassifier` and its result (category per statement, batch verdict, rejection reasons with positions); verify it compiles and the unit-test harness can run table-driven cases
+- [x] 4.2 Implement ScriptDom parsing (TSql170Parser), rejecting parse errors and multiple batches separated by `GO`; verify with unit tests for "Syntax error", "Keywords in comments and strings do not count" and a `GO` case
+- [x] 4.3 Implement the allowlist visitor and per-category allowlists for query, command, ddl and execute, with an unknown node rejecting and naming the element; verify with the classifier table covering "Each category is recognised", "Out-of-scope statements are rejected" and "Unrecognised syntax"
+- [x] 4.4 Implement the side-effect checks (SELECT INTO, OPENQUERY/OPENROWSET/OPENDATASOURCE, NEXT VALUE FOR, locking hints) and dynamic SQL rejection (EXEC string, sp_executesql); verify with table cases for every scenario in "Side-effecting reads are not queries" and "Dynamic and indirect SQL"
+- [x] 4.5 Implement batch homogeneity and the tool-to-category check with the "use the X tool" reason; verify with table cases for "Mixed batch", "Homogeneous batch" and "Wrong tool"
+- [x] 4.6 Grow the query corpus (joins, CTEs, window functions, APPLY, PIVOT/UNPIVOT, JSON/XML functions, FOR SYSTEM_TIME, OPTION hints, TOP/OFFSET-FETCH, UNION/EXCEPT/INTERSECT, subqueries) until each case classifies as query, extending the allowlists only where a test needs it; verify the table passes, and document in ADR-0002's consequences or a `docs/classifier.md` how to add a node type
 
 ## 5. Audit log
 
