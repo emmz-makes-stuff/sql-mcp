@@ -73,6 +73,30 @@
 - [x] 12.1 Create the `release` GitHub environment before any tag, with Emmz (`ThatRendle`) as a required reviewer, self-review allowed, and deployments limited to `v*` tags; verify with `gh api repos/emmz-makes-stuff/sql-mcp/environments`
 - [x] 12.2 Make the README's release setup put the environment and its reviewer first, as a required step, saying why (GitHub auto-creates a missing environment with no rules; nuget.org versions can't be deleted) and how to approve or reject a publish
 
+## 13. Review fixes: project-only databases need approval
+
+- [x] 13.1 Approve each project-only database on its own. Under its project path, `approvals.json` gains `databases: { "<identifier>": { "sha256": "<hash of the raw connection string>" } }`. A database that only the project file defines is available only while that entry matches its raw string. Other edits to the file don't revoke it. A changed host, login or `${env:…}` reference does. Grant and limit widenings stay tied to the whole file's hash, as today. Until it is approved, the database is listed as unavailable, its connection string is never opened, and tools refuse it. The reason says plainly that a person must run `sql-mcp approve` in a terminal. Update design D4 and the "Project adds a database" scenario in `specs/configuration/spec.md`, and add scenarios for an unapproved database and for an edit elsewhere in the file. Verify with approval store, resolver and tool-pipeline tests, and `make validate`
+- [x] 13.2 Make `approve`'s diff list each project-only database that isn't approved: its identifier, and the names of any `${env:…}` variables its connection string reads (names only, never values). Approving records those databases along with the file hash. Make the config-editing commands warn when a write leaves a project-only database unapproved. Verify with approve and config-editing command tests
+
+## 14. Review fixes: errors that escape
+
+- [ ] 14.1 In `SqlServerQueryExecutor`, turn non-`SqlException` failures after the call starts (`InvalidCastException` and the like from reading a row, `InvalidOperationException` from `OpenAsync`) into a `QueryFailed`, so the pipeline audits a `failed` event. Verify with a test where the executor throws, checking that the audit log has the event
+- [ ] 14.2 When `BufferAsync` exits through an exception, cancel the command before disposing the reader, so SqlClient doesn't read the rest of the stream. Verify with an integration test that cancels a long SELECT and returns quickly
+- [ ] 14.3 Give the schema's integer limits a `maximum` (Int32, or Int64 for `maxBytes`), and turn a non-integer value into a `ConfigException` naming the file and JSON path rather than a `FormatException`. Verify with loader tests for `100.0` and `3000000000`
+- [x] 14.4 Stop `approve`'s diff from crashing on two `(invalid)` entries: pair the before and after databases without keying on the identifier. Verify with an approve test that has two invalid entries
+
+## 15. Review fixes: memory bounds
+
+- [ ] 15.1 Enforce the byte cap per value: read with `CommandBehavior.SequentialAccess`, check each large value's length against the remaining budget before reading it in, and count the cap in unescaped UTF-8 bytes. Correct design.md's memory risk row. Verify with integration tests for a `varbinary(max)` value and an `nvarchar(max)` value larger than `maxBytes`
+- [ ] 15.2 Cap the result store at 20 live handles, not configurable. Opening a 21st evicts the least recently used handle, whose next call gets the unknown-handle message. Add the scenario to `specs/query-execution/spec.md`. Verify with result store tests
+
+## 16. Review fixes: cleanup
+
+- [ ] 16.1 Make `ApprovalStore.Approve` write through `AtomicFile.WriteAllText`
+- [ ] 16.2 Make `AtomicFile` keep a symlinked target: resolve the link and write the temp file and rename beside the real file. Verify with a test that edits a symlinked config
+- [ ] 16.3 Make `LaunchCommand.IsOnPath` use `ProgramLookup.Resolve`, so it honours PATHEXT. Verify with launch command tests
+- [ ] 16.4 Delete `tests/SqlMcp.Tests/PlaceholderTests.cs`
+
 ## Workflow follow-up
 
 - Run `/emmz:setup` before starting, to verify dependencies and add the Makefile gates and CLAUDE.md workflow section.

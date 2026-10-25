@@ -76,8 +76,8 @@ internal sealed class ConfigTarget
     }
 
     /// <summary>
-    /// Any write changes the project file's hash, so an earlier approval lapses, and a new widening isn't approved
-    /// yet. Either way, list what is being ignored.
+    /// Any write changes the project file's hash, so an earlier approval of its widenings lapses; a new widening, or a
+    /// new or changed project-only database, isn't approved yet. Either way, list what is being ignored.
     /// </summary>
     private void WarnIfNotApproved(TextWriter error)
     {
@@ -85,8 +85,8 @@ internal sealed class ConfigTarget
         try
         {
             var config = ConfigDiscovery.Discover(_paths, _context.GetVariable);
-            var approved = config.Project is { } project && new ApprovalStore(_paths.Approvals, TimeProvider.System).IsApproved(project.Path, project.Sha256);
-            databases = PermissionResolver.Resolve(config.User, config.Project, approved);
+            var approval = new ApprovalStore(_paths.Approvals, TimeProvider.System).Read(config.Project);
+            databases = PermissionResolver.Resolve(config.User, config.Project, approval);
         }
         catch (ConfigException ex)
         {

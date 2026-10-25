@@ -32,6 +32,19 @@ public sealed class ConfigEditingCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Add_to_the_project_file_warns_that_the_database_needs_approval()
+    {
+        await _cli.RunAsync("init");
+
+        var result = await _cli.RunAsync("db", "add", AppConnection);
+
+        Assert.Contains(
+            "localhost:1433/app: project config adds this database but is not approved. Ask the user to run `sql-mcp approve`",
+            result.Error,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Add_keeps_comments_in_the_file()
     {
         _cli.Project.Write(".sql-mcp/config.json", "{\n  // team databases\n  \"databases\": [],\n}\n");
@@ -153,7 +166,7 @@ public sealed class ConfigEditingCommandTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Equal([ToolGroup.Command], ConfigLoader.Load(ProjectConfig, _ => null).Databases[0].Grants.Allow);
         Assert.Contains("not in effect until approved", result.Error, StringComparison.Ordinal);
-        Assert.Contains("project config grants command but is not approved", result.Error, StringComparison.Ordinal);
+        Assert.Contains("project config adds this database, grants command but is not approved", result.Error, StringComparison.Ordinal);
         Assert.Contains("sql-mcp approve", result.Error, StringComparison.Ordinal);
     }
 
@@ -192,6 +205,8 @@ public sealed class ConfigEditingCommandTests : IDisposable
     {
         await _cli.RunAsync("db", "add", AppConnection);
         await _cli.RunAsync("allow", "query", "--db", "localhost:1433/app");
+        var paths = _cli.Context.Paths();
+        new ApprovalStore(paths.Approvals, TimeProvider.System).Approve(ConfigLoader.Load(paths.ProjectConfig, _ => null));
 
         var result = await _cli.RunAsync("deny", "query", "--db", "localhost:1433/app");
 
@@ -241,7 +256,7 @@ public sealed class ConfigEditingCommandTests : IDisposable
         await _cli.RunAsync("db", "add", AppConnection);
         await _cli.RunAsync("allow", "ddl", "--db", "localhost:1433/app");
         var paths = _cli.Context.Paths();
-        new ApprovalStore(paths.Approvals, TimeProvider.System).Approve(paths.ProjectConfig, ConfigLoader.Load(paths.ProjectConfig, _ => null).Sha256);
+        new ApprovalStore(paths.Approvals, TimeProvider.System).Approve(ConfigLoader.Load(paths.ProjectConfig, _ => null));
 
         var result = await _cli.RunAsync("deny", "execute");
 

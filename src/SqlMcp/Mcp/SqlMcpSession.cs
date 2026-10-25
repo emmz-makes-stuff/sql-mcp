@@ -47,7 +47,7 @@ internal sealed class SqlMcpSession(
 
     /// <summary>
     /// Discovers and layers the config files. An invalid file doesn't throw: it becomes <see cref="ConfigError"/>.
-    /// The project file counts as approved only if its current hash is in <c>approvals.json</c>.
+    /// The project file's widenings, and each project-only database, count as approved only as <c>approvals.json</c> records them.
     /// </summary>
     public static SqlMcpSession Load(
         ConfigPaths paths,
@@ -64,8 +64,8 @@ internal sealed class SqlMcpSession(
         try
         {
             var config = ConfigDiscovery.Discover(paths, getVariable);
-            var approved = config.Project is { } project && new ApprovalStore(paths.Approvals, time).IsApproved(project.Path, project.Sha256);
-            databases = PermissionResolver.Resolve(config.User, config.Project, approved);
+            var approval = new ApprovalStore(paths.Approvals, time).Read(config.Project);
+            databases = PermissionResolver.Resolve(config.User, config.Project, approval);
         }
         catch (ConfigException ex)
         {

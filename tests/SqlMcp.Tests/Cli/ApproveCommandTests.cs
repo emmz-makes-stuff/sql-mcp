@@ -30,7 +30,7 @@ public sealed class ApproveCommandTests : IDisposable
         var result = await _cli.RunAsync("approve");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("localhost:1433/app: allows ddl, maxRows 1000 → 5000", result.Output, StringComparison.Ordinal);
+        Assert.Contains("localhost:1433/app: adds this database, allows ddl, maxRows 1000 → 5000", result.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("pageSize", result.Output, StringComparison.Ordinal);
         Assert.Contains($"type the project directory's name ({DirectoryName})", result.Output, StringComparison.Ordinal);
         Assert.Contains("Approved.", result.Output, StringComparison.Ordinal);
@@ -84,7 +84,7 @@ public sealed class ApproveCommandTests : IDisposable
     public async Task Nothing_to_approve_when_the_project_only_narrows()
     {
         _cli.Project.Write(".sql-mcp/config.json", """
-            { "defaults": { "deny": ["introspection"], "limits": { "maxRows": 10 } }, "databases": [ { "connectionString": "Server=a;Database=b" } ] }
+            { "defaults": { "deny": ["introspection"], "limits": { "maxRows": 10 } } }
             """);
 
         var result = await _cli.RunAsync("approve");
@@ -157,6 +157,57 @@ public sealed class ApproveCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task A_project_only_database_is_shown_with_the_variables_it_reads_and_never_their_values()
+    {
+        _cli.Variables["APP_PW"] = "hunter2";
+        _cli.Project.Write(".sql-mcp/config.json", """
+            { "databases": [ { "connectionString": "Server=evil.example,1433;Database=app;User Id=a;Password=${env:APP_PW}" } ] }
+            """);
+        _cli.Terminal.Input.Enqueue(DirectoryName);
+
+        var result = await _cli.RunAsync("approve");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("evil.example:1433/app: adds this database, reading ${env:APP_PW}", result.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_approved_database_stays_approved_through_other_edits()
+    {
+        _cli.Project.Write(".sql-mcp/config.json", DdlOnApp);
+        _cli.Terminal.Input.Enqueue(DirectoryName);
+        await _cli.RunAsync("approve");
+
+        await _cli.RunAsync("deny", "introspection");
+
+        var app = ResolveApp();
+        Assert.True(app.Entry.IsAvailable);
+        Assert.False(app.IsAllowed(ToolGroup.Ddl));
+        var result = await _cli.RunAsync("approve");
+        Assert.Contains("localhost:1433/app: allows ddl", result.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(ApprovalMessages.AddsDatabase, result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Two_unparseable_entries_do_not_stop_approval()
+    {
+        var userConfig = _cli.Context.Paths().UserConfig;
+        Directory.CreateDirectory(Path.GetDirectoryName(userConfig)!);
+        File.WriteAllText(userConfig, """{ "databases": [ { "connectionString": "Server=a;Bogus=1" } ] }""");
+        _cli.Project.Write(".sql-mcp/config.json", """
+            { "databases": [ { "connectionString": "Server=b;Bogus=2" }, { "connectionString": "Server=localhost,1433;Database=app" } ] }
+            """);
+        _cli.Terminal.Input.Enqueue(DirectoryName);
+
+        var result = await _cli.RunAsync("approve");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("localhost:1433/app: adds this database", result.Output, StringComparison.Ordinal);
+        Assert.Contains("Approved.", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Approve_has_no_options_of_its_own()
     {
         var approve = SqlMcpCli.Build(_cli.Context).Subcommands.Single(c => c.Name == "approve");
@@ -169,7 +220,7 @@ public sealed class ApproveCommandTests : IDisposable
     {
         var paths = _cli.Context.Paths();
         var config = ConfigDiscovery.Discover(paths, _ => null);
-        var approved = new ApprovalStore(paths.Approvals, TimeProvider.System).IsApproved(config.Project!.Path, config.Project.Sha256);
-        return PermissionResolver.Resolve(config.User, config.Project, approved).Single(d => d.Identifier == "localhost:1433/app");
+        var approval = new ApprovalStore(paths.Approvals, TimeProvider.System).Read(config.Project);
+        return PermissionResolver.Resolve(config.User, config.Project, approval).Single(d => d.Identifier == "localhost:1433/app");
     }
 }

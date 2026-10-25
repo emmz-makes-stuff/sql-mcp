@@ -56,6 +56,10 @@ internal static partial class EnvSubstitution
             : new SubstitutionResult(null, missing);
     }
 
+    /// <summary>The names of the variables <paramref name="connectionString"/> refers to, each once, in order. Never their values.</summary>
+    public static IReadOnlyList<string> References(string connectionString) =>
+        [.. Reference().Matches(connectionString).Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal)];
+
     /// <summary>True when the whole value is a single <c>${env:NAME}</c> reference.</summary>
     public static bool IsOnlyReference(string value)
     {

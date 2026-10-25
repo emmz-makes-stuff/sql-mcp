@@ -30,6 +30,7 @@ From your project's root directory:
 ```
 sql-mcp init
 sql-mcp db add 'Server=localhost,1433;Database=app;User Id=sa;Password=${env:APP_PW};TrustServerCertificate=true'
+sql-mcp approve
 sql-mcp config show
 sql-mcp register claude --scope project
 ```
@@ -37,6 +38,10 @@ sql-mcp register claude --scope project
 Use **single quotes** around the connection string, in bash, zsh and PowerShell alike: in double quotes, each of
 those shells expands `${env:APP_PW}` itself, so the file gets an empty password. With single quotes, sql-mcp stores
 the reference, and the server reads the variable when it connects, so the password never lands in the file.
+
+A database the project config adds stays unavailable until you approve it with `sql-mcp approve`, in your own
+terminal. Its connection string can name any server and read your environment variables, so a config you cloned
+must not be able to use it unseen. The approval lasts until that connection string changes.
 
 The database is now available to Claude Code as `localhost:1433/app`, for `query` and `introspection` only. To let
 the agent change data there:
@@ -126,7 +131,8 @@ How the effective permissions are worked out:
   deny wins.
 - **Approval:** anything in the project file that **narrows** access always applies. Anything that **widens** it
   (allowing a denied group, or raising a limit) applies only while the file is approved, and any change to the file
-  lapses the approval. `config show` and the agent's `list_databases` say what's waiting for approval.
+  lapses that approval. A database only the project file defines is unavailable until approved; its approval lapses
+  only when its connection string changes. `config show` and the agent's `list_databases` say what's waiting for approval.
 - **Secrets:** `${env:NAME}` is substituted in connection strings when the server connects. A database whose
   variable isn't set is listed as unavailable.
 

@@ -6,8 +6,9 @@ namespace SqlMcp.Permissions;
 
 /// <summary>
 /// <c>approvals.json</c>, next to the user config:
-/// <c>{ "&lt;canonical project config path&gt;": { "sha256": "…", "approvedAt": "…" } }</c>.
-/// A project file is approved only while the hash of its current bytes matches (design D4).
+/// <c>{ "&lt;canonical project config path&gt;": { "sha256": "…", "approvedAt": "…", "databases": { "&lt;identifier&gt;": { "sha256": "…" } } } }</c>.
+/// The file's widenings are approved only while the hash of its current bytes matches. Each project-only database
+/// is approved while the hash of its raw connection string matches (design D4).
 /// </summary>
 internal sealed class ApprovalStore(string path, TimeProvider time)
 {
@@ -16,28 +17,56 @@ internal sealed class ApprovalStore(string path, TimeProvider time)
     public string Path { get; } = path;
 
     /// <summary>
-    /// True if <paramref name="configPath"/> is approved with this exact hash. A missing or unreadable store
-    /// approves nothing, so a damaged file fails closed.
+    /// What is approved for <paramref name="project"/>, or <see cref="ProjectApproval.None"/> without a project file.
+    /// A missing or unreadable store approves nothing, so a damaged file fails closed.
     /// </summary>
-    public bool IsApproved(string configPath, string sha256)
+    public ProjectApproval Read(ConfigFile? project)
     {
-        var approvals = TryRead();
-        return approvals?[CanonicalPath(configPath)] is JsonObject approval
-            && approval["sha256"]?.GetValue<string>() is { } stored
-            && string.Equals(stored, sha256, StringComparison.OrdinalIgnoreCase);
+        if (project is null || TryRead()?[CanonicalPath(project.Path)] is not JsonObject approval)
+        {
+            return ProjectApproval.None;
+        }
+
+        var fileApproved = approval["sha256"] is JsonValue fileHash
+            && fileHash.TryGetValue<string>(out var stored)
+            && string.Equals(stored, project.Sha256, StringComparison.OrdinalIgnoreCase);
+
+        var databases = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (approval["databases"] is JsonObject approvedDatabases)
+        {
+            foreach (var (identifier, value) in approvedDatabases)
+            {
+                if (value?["sha256"] is JsonValue hash && hash.TryGetValue<string>(out var text))
+                {
+                    databases[identifier] = text;
+                }
+            }
+        }
+
+        return new ProjectApproval(fileApproved, databases);
     }
 
-    /// <summary>Records approval of the file's current hash, replacing any earlier one. Written atomically.</summary>
-    public void Approve(string configPath, string sha256)
+    /// <summary>
+    /// Records approval of <paramref name="project"/> as it stands, its databases included, replacing any earlier
+    /// approval of that file. Written atomically.
+    /// </summary>
+    public void Approve(ConfigFile project)
     {
         var approvals = File.Exists(Path)
             ? TryRead() ?? throw new ConfigException($"{Path}: is not valid JSON, so the approval was not saved. Fix or delete the file.")
             : [];
 
-        approvals[CanonicalPath(configPath)] = new JsonObject
+        var databases = new JsonObject();
+        foreach (var (identifier, hash) in ProjectApproval.Of(project).Databases)
         {
-            ["sha256"] = sha256,
+            databases[identifier] = new JsonObject { ["sha256"] = hash };
+        }
+
+        approvals[CanonicalPath(project.Path)] = new JsonObject
+        {
+            ["sha256"] = project.Sha256,
             ["approvedAt"] = time.GetUtcNow().ToString("O"),
+            ["databases"] = databases,
         };
 
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);

@@ -6,13 +6,15 @@ namespace SqlMcp.Permissions;
 /// Layers the user and project files into effective permissions per database (design D4):
 /// <c>defaults → user.defaults → user.db → project.defaults → project.db</c>, allow then deny at each step so that
 /// deny wins at the same level. The project layer's narrowing always applies; its widening (allowing a group that
-/// was denied before the project layer, or raising a limit) applies only when the project file is approved.
+/// was denied before the project layer, or raising a limit) applies only when the project file is approved. A
+/// database that only the project file defines is unavailable until it is approved on its own, by the hash of its
+/// raw connection string, so an unapproved file can never make sql-mcp connect somewhere with the user's secrets.
 /// </summary>
 internal static class PermissionResolver
 {
     private static readonly HashSet<ToolGroup> DefaultAllowed = [ToolGroup.Query, ToolGroup.Introspection];
 
-    public static IReadOnlyList<EffectiveDatabase> Resolve(ConfigFile? user, ConfigFile? project, bool projectApproved)
+    public static IReadOnlyList<EffectiveDatabase> Resolve(ConfigFile? user, ConfigFile? project, ProjectApproval approval)
     {
         var userEntries = Index(user);
         var projectEntries = Index(project);
@@ -21,14 +23,14 @@ internal static class PermissionResolver
         foreach (var (key, userEntry) in userEntries)
         {
             projectEntries.TryGetValue(key, out var projectEntry);
-            result.Add(Resolve(user!, userEntry, project, projectEntry, projectApproved));
+            result.Add(Resolve(user!, userEntry, project, projectEntry, approval));
         }
 
         foreach (var (key, projectEntry) in projectEntries)
         {
             if (!userEntries.ContainsKey(key))
             {
-                result.Add(Resolve(null, null, project!, projectEntry, projectApproved));
+                result.Add(Resolve(null, null, project!, projectEntry, approval));
             }
         }
 
@@ -40,8 +42,9 @@ internal static class PermissionResolver
         DatabaseEntry? userEntry,
         ConfigFile? project,
         DatabaseEntry? projectEntry,
-        bool projectApproved)
+        ProjectApproval approval)
     {
+        var projectApproved = approval.FileApproved;
         var groups = Enum.GetValues<ToolGroup>()
             .ToDictionary(g => g, g => new GroupGrant(g, DefaultAllowed.Contains(g), PermissionSource.Default));
         var limits = EffectiveLimits.Default;
@@ -96,6 +99,20 @@ internal static class PermissionResolver
 
         // The user file owns the connection string of a database it defines (see the 2026-10-25 devlog decision).
         var entry = userEntry ?? projectEntry!;
+
+        // A project-only database is never connected to until approved: its string may name any host and pull in
+        // the user's environment variables. An unparseable entry is unavailable anyway.
+        if (userEntry is null && entry.Identifier != DatabaseIdentity.InvalidIdentifier && !approval.Covers(entry))
+        {
+            widenings.Insert(0, ApprovalMessages.AddsDatabase);
+            var notApproved = ApprovalMessages.NotApproved(ApprovalMessages.AddsDatabase);
+            entry = entry with
+            {
+                ConnectionString = null,
+                UnavailableReason = entry.UnavailableReason is { } other ? $"{notApproved} Also: {other}" : notApproved,
+            };
+        }
+
         var definedIn = userEntry is not null ? user!.Path : project!.Path;
         return new EffectiveDatabase(entry.Identifier, entry, definedIn, groups, limits, widenings);
     }

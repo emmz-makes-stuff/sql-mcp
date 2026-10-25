@@ -95,9 +95,17 @@ defaults --> user.defaults --> user.db --> project.defaults --> project.db
   the project layer.
 - A database that only the project file defines starts from defaults plus the user's defaults. Any group it allows
   beyond those also counts as widening.
+- **A project-only database is itself a widening** (review fix §13). Until it is approved, it is listed as
+  unavailable with the `ApprovalMessages` wording, and its connection string is never used. *Why:* that string can
+  name any host, and `${env:…}` pulls the user's secrets into it. An unapproved, checked-in config could otherwise
+  send a token, or an Integrated Security handshake, to an attacker's server on the first `query`.
 - **Approval**: `approvals.json` sits next to the user config:
-  `{ "<absolute canonical path of project config>": { "sha256": "...", "approvedAt": "..." } }`.
-  It is approved only when the SHA-256 of the file's current bytes matches.
+  `{ "<absolute canonical path of project config>": { "sha256": "...", "approvedAt": "...", "databases": { "<identifier>": { "sha256": "..." } } } }`.
+  - The file's grant and limit widenings are approved only while the SHA-256 of its current bytes matches.
+  - Each project-only database is approved while the SHA-256 of its raw connection string (before substitution)
+    matches. So it stays available through a `git pull` or a `sql-mcp deny` elsewhere in the file, but not
+    through a changed host, login or variable reference.
+  - *Rejected:* approving databases only through the whole-file hash. Every edit would take them offline.
 - **Self-approval guard**: `approve` requires `Console.IsInputRedirected` and `Console.IsOutputRedirected` both
   to be false. It shows the widening diff, then asks the user to type the project directory's name. There is no
   `--yes`. *Why:* an honest agent told "needs approval" tends to run the command it was pointed at, or find `--yes`

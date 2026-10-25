@@ -5,6 +5,7 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using SqlMcp.Configuration;
 using SqlMcp.Execution.SqlServer;
+using SqlMcp.Permissions;
 
 namespace SqlMcp.IntegrationTests.Mcp;
 
@@ -37,6 +38,10 @@ public sealed class ServeTests : IAsyncLifetime
         Directory.CreateDirectory(Path.Combine(Project, ".sql-mcp"));
         var config = new JsonObject { ["databases"] = new JsonArray(new JsonObject { ["connectionString"] = _db.ConnectionString }) };
         await File.WriteAllTextAsync(Path.Combine(Project, ".sql-mcp", "config.json"), config.ToJsonString());
+
+        // A project-only database is unavailable until a person approves it; stand in for them here.
+        var paths = ConfigPaths.Create(isWindows: false, Home, Home, Project, projectDirectory: null);
+        new ApprovalStore(paths.Approvals, TimeProvider.System).Approve(ConfigLoader.Load(paths.ProjectConfig, _ => null));
 
         await _db.ScalarAsync($"CREATE TABLE dbo.{_table} (id int, name nvarchar(50)); INSERT INTO dbo.{_table} VALUES (1, N'alice'), (2, N'bob'), (3, N'carol')");
     }

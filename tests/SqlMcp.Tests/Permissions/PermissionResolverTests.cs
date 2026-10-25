@@ -38,7 +38,7 @@ public class PermissionResolverTests
               "databases": [
                 { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] },
                 { "connectionString": "Server=sqlhost;Database=Hr" } ] }
-            """), null, projectApproved: false);
+            """), null, ProjectApproval.None);
 
         Assert.True(Find(databases, "sqlhost:1433/sales").IsAllowed(ToolGroup.Command));
         var hr = Find(databases, "sqlhost:1433/hr");
@@ -79,18 +79,63 @@ public class PermissionResolverTests
     }
 
     [Fact]
-    public void Project_adds_a_database()
+    public void Project_adds_an_approved_database()
     {
+        var project = Project("""{ "databases": [ { "connectionString": "Server=localhost;Database=App" } ] }""");
         var databases = PermissionResolver.Resolve(
             User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }"""),
-            Project("""{ "databases": [ { "connectionString": "Server=localhost;Database=App" } ] }"""),
-            projectApproved: false);
+            project,
+            new ProjectApproval(false, ProjectApproval.Of(project).Databases));
 
         var app = Find(databases, "localhost:1433/app");
         Assert.True(app.Entry.IsAvailable);
         Assert.Equal([ToolGroup.Query, ToolGroup.Introspection], Allowed(app));
         Assert.Equal(ProjectPath, app.DefinedIn);
         Assert.Empty(app.UnapprovedWidenings);
+    }
+
+    [Fact]
+    public void An_unapproved_project_database_is_unavailable_and_never_connected_to()
+    {
+        var project = ConfigLoader.Parse(
+            ProjectPath,
+            """{ "databases": [ { "connectionString": "Server=evil.example;Database=X;Password=${env:SECRET}" } ] }""",
+            name => name == "SECRET" ? "hunter2" : null);
+        var databases = PermissionResolver.Resolve(null, project, ProjectApproval.None);
+
+        var db = Assert.Single(databases);
+        Assert.False(db.Entry.IsAvailable);
+        Assert.Null(db.Entry.ConnectionString);
+        Assert.Equal(
+            "project config adds this database but is not approved. Ask the user to run `sql-mcp approve` in their own terminal. Agents cannot approve.",
+            db.Entry.UnavailableReason);
+        Assert.Equal([ApprovalMessages.AddsDatabase], db.UnapprovedWidenings);
+    }
+
+    [Fact]
+    public void Database_approval_survives_other_edits_but_not_a_changed_connection_string()
+    {
+        var approved = Project("""{ "databases": [ { "connectionString": "Server=localhost;Database=App" } ] }""");
+        var approval = ProjectApproval.Of(approved);
+
+        var otherEdit = Project("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=localhost;Database=App" } ] }""");
+        var newHost = Project("""{ "databases": [ { "connectionString": "Server=localhost;Database=App;User ID=sa" } ] }""");
+
+        Assert.True(Assert.Single(PermissionResolver.Resolve(null, otherEdit, approval with { FileApproved = false })).Entry.IsAvailable);
+        Assert.False(Assert.Single(PermissionResolver.Resolve(null, newHost, approval with { FileApproved = false })).Entry.IsAvailable);
+    }
+
+    [Fact]
+    public void A_user_defined_database_needs_no_database_approval()
+    {
+        var db = Assert.Single(PermissionResolver.Resolve(
+            User("""{ "databases": [ { "connectionString": "Server=localhost;Database=App" } ] }"""),
+            Project("""{ "databases": [ { "connectionString": "Server=localhost;Database=App;User ID=other", "deny": ["introspection"] } ] }"""),
+            ProjectApproval.None));
+
+        Assert.True(db.Entry.IsAvailable);
+        Assert.Empty(db.UnapprovedWidenings);
+        Assert.False(db.IsAllowed(ToolGroup.Introspection));
     }
 
     [Fact]
@@ -204,7 +249,7 @@ public class PermissionResolverTests
         var databases = PermissionResolver.Resolve(
             User("""{ "databases": [ { "connectionString": "Server=a;Bogus=1" } ] }"""),
             Project("""{ "databases": [ { "connectionString": "Server=b;Bogus=2" } ] }"""),
-            projectApproved: false);
+            ProjectApproval.None);
 
         Assert.Equal(2, databases.Count);
     }
@@ -213,8 +258,12 @@ public class PermissionResolverTests
 
     private static ConfigFile Project(string json) => ConfigLoader.Parse(ProjectPath, json, _ => null);
 
+    /// <summary>
+    /// <paramref name="approved"/> is whether the project file's widenings are approved. Its databases always are, so
+    /// these tests see grants and limits; the database approval tests pass a <see cref="ProjectApproval"/> directly.
+    /// </summary>
     private static EffectiveDatabase Single(ConfigFile? user, ConfigFile? project = null, bool approved = false) =>
-        Assert.Single(PermissionResolver.Resolve(user, project, approved));
+        Assert.Single(PermissionResolver.Resolve(user, project, project is null ? ProjectApproval.None : new ProjectApproval(approved, ProjectApproval.Of(project).Databases)));
 
     private static EffectiveDatabase Find(IReadOnlyList<EffectiveDatabase> databases, string identifier) =>
         Assert.Single(databases, db => db.Identifier == identifier);

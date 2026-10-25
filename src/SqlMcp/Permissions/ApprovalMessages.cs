@@ -13,6 +13,9 @@ internal static class ApprovalMessages
     /// <summary>E.g. "project config grants ddl but is not approved. Ask the user to …".</summary>
     public static string NotApproved(string widening) => $"project config {widening} but is not approved. {AskTheUser}";
 
+    /// <summary>The widening of a database that only the project file defines, until it is approved.</summary>
+    public const string AddsDatabase = "adds this database";
+
     public static string Grants(ToolGroup group) => $"grants {group.ToConfigName()}";
 
     public static string Raises(string limit) => $"raises {limit}";

@@ -23,11 +23,11 @@ internal static class ConfigShowCommand
     {
         var paths = context.Paths();
         var config = ConfigDiscovery.Discover(paths, context.GetVariable);
-        var approved = config.Project is { } project && new ApprovalStore(paths.Approvals, TimeProvider.System).IsApproved(project.Path, project.Sha256);
-        var databases = PermissionResolver.Resolve(config.User, config.Project, approved);
+        var approval = new ApprovalStore(paths.Approvals, TimeProvider.System).Read(config.Project);
+        var databases = PermissionResolver.Resolve(config.User, config.Project, approval);
 
         output.WriteLine($"User config:    {paths.UserConfig}{(config.User is null ? " (not found)" : "")}");
-        output.WriteLine($"Project config: {paths.ProjectConfig}{(config.Project is null ? " (not found)" : approved ? " (approved)" : " (not approved)")}");
+        output.WriteLine($"Project config: {paths.ProjectConfig}{(config.Project is null ? " (not found)" : approval.FileApproved ? " (approved)" : " (not approved)")}");
         output.WriteLine();
 
         if (databases.Count == 0)

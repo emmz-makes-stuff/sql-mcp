@@ -33,9 +33,10 @@ public sealed class ConfigShowCommandTests : IDisposable
         Assert.Contains("allowed:    query (default)", result.Output, StringComparison.Ordinal);
         Assert.Contains("introspection (project config)", result.Output, StringComparison.Ordinal);
         Assert.Contains("ddl (project config not approved)", result.Output, StringComparison.Ordinal);
-        Assert.Contains("available:  no (environment variable REPORTS_PW is not set)", result.Output, StringComparison.Ordinal);
+        Assert.Contains("available:  no (project config adds this database but is not approved.", result.Output, StringComparison.Ordinal);
+        Assert.Contains("Also: environment variable REPORTS_PW is not set)", result.Output, StringComparison.Ordinal);
         Assert.Contains("limits:     10 rows,", result.Output, StringComparison.Ordinal);
-        Assert.Contains("note:       project config grants ddl but is not approved.", result.Output, StringComparison.Ordinal);
+        Assert.Contains("note:       project config adds this database, grants ddl but is not approved.", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]

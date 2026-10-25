@@ -18,7 +18,7 @@ public sealed class ApprovalTests : IDisposable
     {
         var path = WriteProject("""{ "databases": [] }""");
 
-        Assert.False(_store.IsApproved(path, Load(path).Sha256));
+        Assert.Equal(ProjectApproval.None, _store.Read(Load(path)));
     }
 
     [Fact]
@@ -27,9 +27,9 @@ public sealed class ApprovalTests : IDisposable
         var path = WriteProject("""{ "databases": [] }""");
         var file = Load(path);
 
-        _store.Approve(path, file.Sha256);
+        _store.Approve(file);
 
-        Assert.True(_store.IsApproved(path, file.Sha256));
+        Assert.True(_store.Read(file).FileApproved);
         var stored = JsonNode.Parse(File.ReadAllText(_store.Path))!.AsObject();
         var approval = Assert.Single(stored);
         Assert.Equal(ApprovalStore.CanonicalPath(path), approval.Key);
@@ -38,13 +38,13 @@ public sealed class ApprovalTests : IDisposable
     }
 
     [Fact]
-    public void Editing_the_file_invalidates_approval()
+    public void Editing_the_file_invalidates_approval_of_its_grants_but_not_its_database()
     {
         const string original = """
             { "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["ddl"], "deny": ["introspection"] } ] }
             """;
         var path = WriteProject(original);
-        _store.Approve(path, Load(path).Sha256);
+        _store.Approve(Load(path));
         Assert.True(Effective(path).IsAllowed(ToolGroup.Ddl));
 
         // Any change at all, even whitespace.
@@ -54,19 +54,46 @@ public sealed class ApprovalTests : IDisposable
         Assert.False(db.IsAllowed(ToolGroup.Ddl));
         Assert.Equal(PermissionSource.ProjectConfigNotApproved, db.Groups[ToolGroup.Ddl].Source);
         Assert.False(db.IsAllowed(ToolGroup.Introspection));
+        Assert.True(db.Entry.IsAvailable);
+    }
+
+    [Fact]
+    public void Approval_records_each_database_by_the_hash_of_its_raw_connection_string()
+    {
+        var path = WriteProject("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales;Password=${env:PW}" } ] }""");
+
+        _store.Approve(Load(path));
+
+        var stored = JsonNode.Parse(File.ReadAllText(_store.Path))![ApprovalStore.CanonicalPath(path)]!["databases"]!.AsObject();
+        var database = Assert.Single(stored);
+        Assert.Equal("sqlhost:1433/sales", database.Key);
+        Assert.Equal(ProjectApproval.Hash("Server=sqlhost;Database=Sales;Password=${env:PW}"), database.Value!["sha256"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void Changing_a_databases_connection_string_makes_it_unavailable_until_approved_again()
+    {
+        var path = WriteProject("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        _store.Approve(Load(path));
+
+        WriteProject("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales;User ID=sa" } ] }""");
+
+        var db = Effective(path);
+        Assert.False(db.Entry.IsAvailable);
+        Assert.Contains(ApprovalMessages.AddsDatabase, db.Entry.UnavailableReason, StringComparison.Ordinal);
     }
 
     [Fact]
     public void Approving_again_replaces_the_old_hash()
     {
         var path = WriteProject("""{ "databases": [] }""");
-        _store.Approve(path, Load(path).Sha256);
+        _store.Approve(Load(path));
         File.WriteAllText(path, """{ "databases": [ ] }""");
         var edited = Load(path);
 
-        _store.Approve(path, edited.Sha256);
+        _store.Approve(edited);
 
-        Assert.True(_store.IsApproved(path, edited.Sha256));
+        Assert.True(_store.Read(edited).FileApproved);
         Assert.Single(JsonNode.Parse(File.ReadAllText(_store.Path))!.AsObject());
     }
 
@@ -77,8 +104,8 @@ public sealed class ApprovalTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(_store.Path)!);
         File.WriteAllText(_store.Path, "{ not json");
 
-        Assert.False(_store.IsApproved(path, Load(path).Sha256));
-        var ex = Assert.Throws<ConfigException>(() => _store.Approve(path, Load(path).Sha256));
+        Assert.Equal(ProjectApproval.None, _store.Read(Load(path)));
+        var ex = Assert.Throws<ConfigException>(() => _store.Approve(Load(path)));
         Assert.Contains(_store.Path, ex.Message, StringComparison.Ordinal);
         Assert.Equal("{ not json", File.ReadAllText(_store.Path));
     }
@@ -91,9 +118,9 @@ public sealed class ApprovalTests : IDisposable
         Directory.CreateSymbolicLink(link, Path.Combine(_temp.Path, "project"));
         var throughLink = Path.Combine(link, ".sql-mcp", "config.json");
 
-        _store.Approve(throughLink, Load(path).Sha256);
+        _store.Approve(Load(throughLink));
 
-        Assert.True(_store.IsApproved(path, Load(path).Sha256));
+        Assert.True(_store.Read(Load(path)).FileApproved);
         Assert.Equal(ApprovalStore.CanonicalPath(path), ApprovalStore.CanonicalPath(throughLink));
     }
 
@@ -123,6 +150,6 @@ public sealed class ApprovalTests : IDisposable
     private EffectiveDatabase Effective(string projectPath)
     {
         var project = Load(projectPath);
-        return Assert.Single(PermissionResolver.Resolve(null, project, _store.IsApproved(projectPath, project.Sha256)));
+        return Assert.Single(PermissionResolver.Resolve(null, project, _store.Read(project)));
     }
 }
