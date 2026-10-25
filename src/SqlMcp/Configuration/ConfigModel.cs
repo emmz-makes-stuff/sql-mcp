@@ -22,8 +22,8 @@ internal sealed record GrantSettings(
     public static readonly GrantSettings None = new([], [], LimitSettings.None);
 }
 
-/// <summary>One parsed and validated config file.</summary>
-internal sealed record ConfigFile(string Path, GrantSettings Defaults, IReadOnlyList<DatabaseEntry> Databases);
+/// <summary>One parsed and validated config file. <see cref="Sha256"/> is the lower-case hex hash of its bytes.</summary>
+internal sealed record ConfigFile(string Path, string Sha256, GrantSettings Defaults, IReadOnlyList<DatabaseEntry> Databases);
 
 /// <summary>
 /// One entry of a file's <c>databases</c> array. <see cref="Identifier"/> is computed from the connection string

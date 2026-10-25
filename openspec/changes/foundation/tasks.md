@@ -15,8 +15,8 @@
 
 ## 3. Permissions, layering and approval
 
-- [ ] 3.1 Implement tool groups and effective-permission resolution with a source for each group (defaults → user defaults → user db → project defaults → project db, deny wins at the same level), plus limits resolution; verify with unit tests for each scenario in the permissions spec's "Default grants" and "Global and per-database allow and deny lists"
-- [ ] 3.2 Implement the approval store (`approvals.json`, canonical path → SHA-256) and the narrow/widen split, so that unapproved widening is ignored, and add the shared `ApprovalMessages` wording addressed to a person; verify with unit tests for "Project adds a database", "Project narrows a grant", "Unapproved widening is ignored", "Approved widening applies", "Editing the file invalidates approval" and "Denial wording is addressed to a person"
+- [x] 3.1 Implement tool groups and effective-permission resolution with a source for each group (defaults → user defaults → user db → project defaults → project db, deny wins at the same level), plus limits resolution; verify with unit tests for each scenario in the permissions spec's "Default grants" and "Global and per-database allow and deny lists"
+- [x] 3.2 Implement the approval store (`approvals.json`, canonical path → SHA-256) and the narrow/widen split, so that unapproved widening is ignored, and add the shared `ApprovalMessages` wording addressed to a person; verify with unit tests for "Project adds a database", "Project narrows a grant", "Unapproved widening is ignored", "Approved widening applies", "Editing the file invalidates approval" and "Denial wording is addressed to a person"
 
 ## 4. Statement classification
 

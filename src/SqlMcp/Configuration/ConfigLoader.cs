@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Json.Schema;
@@ -22,21 +23,29 @@ internal static class ConfigLoader
 
     public static ConfigFile Load(string path, Func<string, string?> getVariable)
     {
-        string text;
+        byte[] bytes;
         try
         {
-            text = File.ReadAllText(path);
+            bytes = File.ReadAllBytes(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new ConfigException($"{path}: can't be read: {ex.Message}", ex);
         }
 
-        return Parse(path, text, getVariable);
+        // The hash is of the exact bytes, so approval lapses on any change, even to whitespace or encoding.
+        using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return Parse(path, reader.ReadToEnd(), Hash(bytes), getVariable);
     }
 
     /// <summary>Parses and validates <paramref name="text"/>. <paramref name="path"/> is only used in messages.</summary>
-    public static ConfigFile Parse(string path, string text, Func<string, string?> getVariable)
+    public static ConfigFile Parse(string path, string text, Func<string, string?> getVariable) =>
+        Parse(path, text, Hash(Encoding.UTF8.GetBytes(text)), getVariable);
+
+    /// <summary>Lower-case hex SHA-256, the fingerprint stored in <c>approvals.json</c>.</summary>
+    public static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    private static ConfigFile Parse(string path, string text, string sha256, Func<string, string?> getVariable)
     {
         JsonDocument document;
         try
@@ -58,7 +67,7 @@ internal static class ConfigLoader
                 throw new ConfigException(string.Join(Environment.NewLine, errors.Select(e => $"{path}: {e}")));
             }
 
-            var file = Map(path, document.RootElement, getVariable);
+            var file = Map(path, sha256, document.RootElement, getVariable);
             CheckDuplicates(file);
             return file;
         }
@@ -120,7 +129,7 @@ internal static class ConfigLoader
         return message;
     }
 
-    private static ConfigFile Map(string path, JsonElement root, Func<string, string?> getVariable)
+    private static ConfigFile Map(string path, string sha256, JsonElement root, Func<string, string?> getVariable)
     {
         var defaults = root.TryGetProperty("defaults", out var d) ? MapGrants(d) : GrantSettings.None;
 
@@ -135,7 +144,7 @@ internal static class ConfigLoader
             }
         }
 
-        return new ConfigFile(path, defaults, databases);
+        return new ConfigFile(path, sha256, defaults, databases);
     }
 
     private static DatabaseEntry MapDatabase(string location, JsonElement element, Func<string, string?> getVariable)
