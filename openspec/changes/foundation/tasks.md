@@ -68,6 +68,11 @@
 - [x] 11.1 Write each audit event's type once, as `event`: the overridden `EventType` properties are serialised as a duplicate `event_type` despite `[JsonIgnore]` on the abstract base. Make it one non-virtual `[JsonIgnore]` property set through the base record's constructor; verify with a test that every event subtype serialises with `event` and without `event_type`
 - [x] 11.2 When a statement's category has no tool in this release, make the wrong-tool refusal say so ("classified as command; this server has no command tool yet") rather than "use the command tool"; add the scenario to `specs/statement-classification/spec.md`; verify with classifier and tool-pipeline tests, and that `make validate` stays green
 
+## 12. Review fixes: release approval
+
+- [x] 12.1 Create the `release` GitHub environment before any tag, with Emmz (`ThatRendle`) as a required reviewer, self-review allowed, and deployments limited to `v*` tags; verify with `gh api repos/emmz-makes-stuff/sql-mcp/environments`
+- [x] 12.2 Make the README's release setup put the environment and its reviewer first, as a required step, saying why (GitHub auto-creates a missing environment with no rules; nuget.org versions can't be deleted) and how to approve or reject a publish
+
 ## Workflow follow-up
 
 - Run `/emmz:setup` before starting, to verify dependencies and add the Makefile gates and CLAUDE.md workflow section.

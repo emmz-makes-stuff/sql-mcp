@@ -166,18 +166,26 @@ Pushing a `v*` tag (for example `v0.1.0`) runs `.github/workflows/release.yml`. 
 [Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so there's no
 long-lived API key. The publish job runs in the `release` GitHub environment.
 
-One-time setup:
+A version published to nuget.org **can't be deleted**, only unlisted, and its version number stays used. So every
+publish waits for a person to approve it.
 
-1. On nuget.org, open your username menu → **Trusted Publishing**, and add a policy:
+One-time setup, in this order:
+
+1. In the GitHub repository, under **Settings → Environments**, create an environment named `release`:
+   - **Required reviewers:** yourself. Leave "Prevent self-review" off, so you can approve your own tag.
+   - **Deployment branches and tags:** "Selected branches and tags", with a tag rule `v*`.
+
+   Do this first. If the environment doesn't exist when the workflow runs, GitHub creates it with no rules, and
+   once steps 2 and 3 are done a tag would publish without waiting.
+2. On nuget.org, open your username menu → **Trusted Publishing**, and add a policy:
    - **Repository Owner:** `emmz-makes-stuff`
    - **Repository:** `sql-mcp`
    - **Workflow File:** `release.yml` (the file name only)
    - **Environment:** `release`
-2. In the GitHub repository, under **Settings → Environments**, create an environment named `release`. Add
-   required reviewers if each publish should wait for approval.
 3. Add a repository secret `NUGET_USER` holding your nuget.org username (not your email address).
 
-Then tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+Then tag and push: `git tag v0.1.0 && git push origin v0.1.0`. After the gates pass, the run waits in **Actions**
+until you approve the `publish` job; reject it there if the tag was a mistake.
 
 ## Licence
 
