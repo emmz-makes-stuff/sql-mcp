@@ -8,6 +8,7 @@
 | git | source control | any | `git --version` | — | `brew install git` |
 | openspec | change tracking | >=1.15 | `openspec --version` | — | `npm i -g @fission-ai/openspec` |
 | gh | GitHub remote, PRs, Actions release workflow | any | `gh --version` | `gh auth status` | `brew install gh`; `gh auth login` |
+| actionlint | lints `.github/workflows/*.yml`; the only local check of the release workflow, which can't run before a real tag | any | `actionlint --version` | — | `brew install actionlint` |
 | docker | `itest` gate: SQL Server 2025 container through Testcontainers | engine >=24 | `docker --version` | `docker info` | macOS: `brew install orbstack`, then `orb config set rosetta true` (the mssql image is amd64-only) |
 
 NuGet packages (restored by `dotnet restore`, no separate install): ModelContextProtocol, Microsoft.Data.SqlClient,

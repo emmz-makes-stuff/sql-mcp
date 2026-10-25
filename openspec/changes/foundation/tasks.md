@@ -55,9 +55,9 @@
 
 ## 9. CI and release
 
-- [ ] 9.1 Create the GitHub repository and push `main` (with Emmz's confirmation of the org/name and visibility); verify `git remote -v` and `gh repo view`
-- [ ] 9.2 Add `.github/workflows/ci.yml` (ubuntu-latest, setup .NET 10, then the build, format, test and itest gates); verify a push runs green with `gh run watch`
-- [ ] 9.3 Add `.github/workflows/release.yml` (on a `v*` tag: gates, `dotnet pack -p:Version=${tag#v}`, `NuGet/login` OIDC, `dotnet nuget push`) after checking the current Trusted Publishing action and setup on nuget.org docs; verify with `actionlint` (or a workflow dry run), and record the nuget.org setup steps in the README
+- [x] 9.1 Create the GitHub repository and push `main` (with Emmz's confirmation of the org/name and visibility); verify `git remote -v` and `gh repo view`
+- [x] 9.2 Add `.github/workflows/ci.yml` (ubuntu-latest, setup .NET 10, then the build, format, test and itest gates); verify a push runs green with `gh run watch`
+- [x] 9.3 Add `.github/workflows/release.yml` (on a `v*` tag: gates, `dotnet pack -p:Version=${tag#v}`, `NuGet/login` OIDC, `dotnet nuget push`) after checking the current Trusted Publishing action and setup on nuget.org docs; verify with `actionlint` (or a workflow dry run), and record the nuget.org setup steps in the README
 
 ## 10. End-to-end check
 

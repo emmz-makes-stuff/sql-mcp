@@ -49,6 +49,7 @@ deps:
 	openspec --version >/dev/null 2>&1 || { echo "MISSING openspec — npm i -g @fission-ai/openspec"; fail=1; }; \
 	gh --version >/dev/null 2>&1 || { echo "MISSING gh — brew install gh"; fail=1; }; \
 	gh auth status >/dev/null 2>&1 || { echo "NOT AUTHENTICATED gh — gh auth login"; fail=1; }; \
+	actionlint --version >/dev/null 2>&1 || { echo "MISSING actionlint — brew install actionlint"; fail=1; }; \
 	docker --version >/dev/null 2>&1 || { echo "MISSING docker — brew install orbstack; orb config set rosetta true"; fail=1; }; \
 	docker info >/dev/null 2>&1 || { echo "NOT RUNNING docker daemon — start OrbStack"; fail=1; }; \
 	echo "DEPS_EXIT:$$fail"; exit $$fail

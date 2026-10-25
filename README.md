@@ -155,3 +155,30 @@ lint:   none separate (analyzers run in the build; warnings are errors)
 
 `make gates` runs all of them. `itest` uses `mcr.microsoft.com/mssql/server:2025-latest`; on Apple Silicon that
 needs OrbStack with Rosetta enabled.
+
+CI (`.github/workflows/ci.yml`) runs the build, format, test and itest gates on pull requests to `main` and on pushes
+to it. Lint the workflows locally with `actionlint`.
+
+## Releasing
+
+Pushing a `v*` tag (for example `v0.1.0`) runs `.github/workflows/release.yml`. It runs the gates, packs
+`Emmz.SqlMcp` with the tag as its version (without the `v`), and pushes it to nuget.org through
+[Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so there's no
+long-lived API key. The publish job runs in the `release` GitHub environment.
+
+One-time setup:
+
+1. On nuget.org, open your username menu → **Trusted Publishing**, and add a policy:
+   - **Repository Owner:** `emmz-makes-stuff`
+   - **Repository:** `sql-mcp`
+   - **Workflow File:** `release.yml` (the file name only)
+   - **Environment:** `release`
+2. In the GitHub repository, under **Settings → Environments**, create an environment named `release`. Add
+   required reviewers if each publish should wait for approval.
+3. Add a repository secret `NUGET_USER` holding your nuget.org username (not your email address).
+
+Then tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
