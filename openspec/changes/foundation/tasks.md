@@ -29,8 +29,8 @@
 
 ## 5. Audit log
 
-- [ ] 5.1 Implement `AuditLog` (session id, file naming, project dir or fallback dir, `.sql-mcp/.gitignore` creation, a lock-and-flush write per event, the unavailable flag) and typed events (session_start, session_end, executed, denied, failed, introspection) with no fields for values or secrets; verify with unit tests for every audit-log spec scenario except the git check, plus a test that serialises each event type and asserts no connection string or row value appears
-- [ ] 5.2 Verify the git-ignore behaviour with a unit test that runs `git init` in a temp dir, creates logs through `AuditLog`, and asserts `git status --porcelain` doesn't list them
+- [x] 5.1 Implement `AuditLog` (session id, file naming, project dir or fallback dir, `.sql-mcp/.gitignore` creation, a lock-and-flush write per event, the unavailable flag) and typed events (session_start, session_end, executed, denied, failed, introspection) with no fields for values or secrets; verify with unit tests for every audit-log spec scenario except the git check, plus a test that serialises each event type and asserts no connection string or row value appears
+- [x] 5.2 Verify the git-ignore behaviour with a unit test that runs `git init` in a temp dir, creates logs through `AuditLog`, and asserts `git status --porcelain` doesn't list them
 
 ## 6. Query execution
 
