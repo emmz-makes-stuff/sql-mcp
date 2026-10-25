@@ -8,10 +8,10 @@
 
 ## 2. Configuration
 
-- [ ] 2.1 Write `schema/config.schema.json` (defaults, databases, allow/deny groups, limits, engine) as an embedded resource, and implement loading with comments and trailing commas plus JsonSchema.Net validation that reports file and JSON path; verify with unit tests for the "Comments are accepted" and "Invalid file" scenarios
-- [ ] 2.2 Implement database identity from connection strings (`tcp:`, `host,port`, default 1433, lower-casing, rejecting a named instance without a port, no DNS resolution, duplicate detection within a layer); verify with unit tests for every scenario in the configuration spec's "Database identity" requirement
-- [ ] 2.3 Implement `${env:NAME}` substitution with an injectable environment, marking a database unavailable when a variable is unset, and a masking helper for any display of connection strings; verify with unit tests for "Variable is set", "Variable is missing" and "Secrets are not exposed"
-- [ ] 2.4 Implement file discovery (user path per OS, project `.sql-mcp/config.json` from cwd or `--project`); verify with unit tests on temp directories for the "Only a user file exists" and "Neither file exists" scenarios
+- [x] 2.1 Write `schema/config.schema.json` (defaults, databases, allow/deny groups, limits, engine) as an embedded resource, and implement loading with comments and trailing commas plus JsonSchema.Net validation that reports file and JSON path; verify with unit tests for the "Comments are accepted" and "Invalid file" scenarios
+- [x] 2.2 Implement database identity from connection strings (`tcp:`, `host,port`, default 1433, lower-casing, rejecting a named instance without a port, no DNS resolution, duplicate detection within a layer); verify with unit tests for every scenario in the configuration spec's "Database identity" requirement
+- [x] 2.3 Implement `${env:NAME}` substitution with an injectable environment, marking a database unavailable when a variable is unset, and a masking helper for any display of connection strings; verify with unit tests for "Variable is set", "Variable is missing" and "Secrets are not exposed"
+- [x] 2.4 Implement file discovery (user path per OS, project `.sql-mcp/config.json` from cwd or `--project`); verify with unit tests on temp directories for the "Only a user file exists" and "Neither file exists" scenarios
 
 ## 3. Permissions, layering and approval
 

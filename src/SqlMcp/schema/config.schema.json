@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sql-mcp configuration",
+  "description": "User-level (~/.config/sql-mcp/config.json) or project-level (.sql-mcp/config.json) configuration for sql-mcp.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "defaults": {
+      "description": "Grants and limits applied to every database in this file, before per-database settings.",
+      "$ref": "#/$defs/grants"
+    },
+    "databases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/database"
+      }
+    }
+  },
+  "$defs": {
+    "group": {
+      "enum": ["query", "introspection", "command", "ddl", "execute"]
+    },
+    "groupList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      },
+      "uniqueItems": true
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxRows": {
+          "description": "Most rows buffered for one query. Default 1000.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxBytes": {
+          "description": "Most bytes buffered for one query. Default 5242880 (5 MB).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "pageSize": {
+          "description": "Rows per page. Default 100.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "description": "Command timeout in seconds. Default 30.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "grants": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "$ref": "#/$defs/groupList"
+        },
+        "deny": {
+          "$ref": "#/$defs/groupList"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectionString"],
+      "properties": {
+        "connectionString": {
+          "description": "SQL Server connection string. May reference environment variables as ${env:NAME}.",
+          "type": "string",
+          "minLength": 1
+        },
+        "engine": {
+          "enum": ["sqlserver"],
+          "default": "sqlserver"
+        },
+        "allow": {
+          "$ref": "#/$defs/groupList"
+        },
+        "deny": {
+          "$ref": "#/$defs/groupList"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        }
+      }
+    }
+  }
+}
