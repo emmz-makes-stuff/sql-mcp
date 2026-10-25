@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SqlMcp/SqlMcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SqlMcp.IntegrationTests/SqlMcp.IntegrationTests.csproj" />
+    <Project Path="tests/SqlMcp.Tests/SqlMcp.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sql-mcp</ToolCommandName>
+    <PackageId>Emmz.SqlMcp</PackageId>
+    <Description>An MCP server that gives coding agents controlled, audited access to SQL databases.</Description>
+    <PackageTags>mcp;sql;sqlserver;ai;agents</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SqlMcp.Tests" />
+    <InternalsVisibleTo Include="SqlMcp.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

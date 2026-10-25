@@ -2,9 +2,9 @@
 
 ## 1. Repo scaffolding
 
-- [ ] 1.1 Add `global.json` (SDK 10.0.400, rollForward latestFeature, `test.runner` = Microsoft.Testing.Platform), `Directory.Build.props` (TreatWarningsAsErrors, Nullable, ImplicitUsings, AnalysisLevel latest-recommended), `Directory.Packages.props` (central versions for every package in design D1/D3/D10), `.editorconfig` and `.gitignore`; verify `dotnet --version` in the repo root reports 10.0.x
-- [ ] 1.2 Create `sql-mcp.slnx` with `src/SqlMcp` (PackAsTool, PackageId Emmz.SqlMcp, ToolCommandName sql-mcp, net10.0) and `tests/SqlMcp.Tests` / `tests/SqlMcp.IntegrationTests` (xunit.v3), each test project with one placeholder test; verify the build, test, itest and format gates from design D1 all exit 0
-- [ ] 1.3 Add a README stub that states purpose, the threat model (clumsy but honest agents) and the gate commands; verify the gate commands in it match design D1 exactly
+- [x] 1.1 Add `global.json` (SDK 10.0.400, rollForward latestFeature, `test.runner` = Microsoft.Testing.Platform), `Directory.Build.props` (TreatWarningsAsErrors, Nullable, ImplicitUsings, AnalysisLevel latest-recommended), `Directory.Packages.props` (central versions for every package in design D1/D3/D10), `.editorconfig` and `.gitignore`; verify `dotnet --version` in the repo root reports 10.0.x
+- [x] 1.2 Create `sql-mcp.slnx` with `src/SqlMcp` (PackAsTool, PackageId Emmz.SqlMcp, ToolCommandName sql-mcp, net10.0) and `tests/SqlMcp.Tests` / `tests/SqlMcp.IntegrationTests` (xunit.v3), each test project with one placeholder test; verify the build, test, itest and format gates from design D1 all exit 0
+- [x] 1.3 Add a README stub that states purpose, the threat model (clumsy but honest agents) and the gate commands; verify the gate commands in it match design D1 exactly
 
 ## 2. Configuration
 

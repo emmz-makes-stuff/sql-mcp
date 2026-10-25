@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+artifacts/
+*.nupkg
+*.snupkg
+
+# Test output
+TestResults/
+*.trx
+coverage*.xml
+
+# IDEs and OS
+.vs/
+.idea/
+*.user
+*.suo
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# Local Claude Code settings
+.claude/settings.local.json
