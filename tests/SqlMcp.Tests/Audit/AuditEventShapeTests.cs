@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using SqlMcp.Audit;
 
 namespace SqlMcp.Tests.Audit;
@@ -55,17 +56,7 @@ public class AuditEventShapeTests
         const string connectionString = "Server=sqlhost;Database=Sales;Password=hunter2";
         const string rowValue = "alice@example.com";
 
-        AuditEvent[] events =
-        [
-            new SessionStartEvent("1.0.0", ["/p/.sql-mcp/config.json"], "/p/.sql-mcp/logs/x.jsonl", 1),
-            new SessionEndEvent("1.0.0", ["/p/.sql-mcp/config.json"]),
-            new ExecutedEvent("query", "sqlhost:1433/sales", "SELECT email FROM users", ["query"], 1, 1, false),
-            new DeniedEvent("query", "sqlhost:1433/sales", "DELETE FROM users", "classified as command; use the command tool"),
-            new FailedEvent("query", "sqlhost:1433/sales", "SELECT CAST(email AS int) FROM users", FailureKind.Sql, 245, 16, 1, 1),
-            new IntrospectionEvent("describe", "sqlhost:1433/sales", "dbo.users"),
-        ];
-
-        foreach (var auditEvent in events)
+        foreach (var auditEvent in OneOfEach())
         {
             var line = log.Serialise(auditEvent);
             Assert.DoesNotContain(connectionString, line, StringComparison.Ordinal);
@@ -73,4 +64,30 @@ public class AuditEventShapeTests
             Assert.DoesNotContain(rowValue, line, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public void Serialised_events_carry_their_type_once_as_event()
+    {
+        using var temp = new TempDirectory();
+        using var log = AuditLog.Open(temp.Path, Path.Combine(temp.Path, "logs"), new FakeTime(DateTimeOffset.UnixEpoch), 1);
+
+        var events = OneOfEach();
+        Assert.Equal(EventTypes.Select(row => row.Data).Order(), events.Select(e => e.GetType().Name).Order());
+        foreach (var auditEvent in events)
+        {
+            var line = JsonNode.Parse(log.Serialise(auditEvent))!.AsObject();
+            Assert.Equal(auditEvent.EventType, line["event"]!.GetValue<string>());
+            Assert.False(line.ContainsKey("event_type"), $"{auditEvent.GetType().Name} also has event_type");
+        }
+    }
+
+    private static AuditEvent[] OneOfEach() =>
+    [
+        new SessionStartEvent("1.0.0", ["/p/.sql-mcp/config.json"], "/p/.sql-mcp/logs/x.jsonl", 1),
+        new SessionEndEvent("1.0.0", ["/p/.sql-mcp/config.json"]),
+        new ExecutedEvent("query", "sqlhost:1433/sales", "SELECT email FROM users", ["query"], 1, 1, false),
+        new DeniedEvent("query", "sqlhost:1433/sales", "DELETE FROM users", "classified as command; use the command tool"),
+        new FailedEvent("query", "sqlhost:1433/sales", "SELECT CAST(email AS int) FROM users", FailureKind.Sql, 245, 16, 1, 1),
+        new IntrospectionEvent("describe", "sqlhost:1433/sales", "dbo.users"),
+    ];
 }

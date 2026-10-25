@@ -22,7 +22,9 @@ D6). This page explains how the SQL Server classifier works, and how to let it a
    The first failure rejects the statement, naming the element (through `Phrases`) and its position.
 4. **Check the batch** against the tool (`ClassificationResult.ForTool`). Every statement must be in the tool's
    category. Otherwise the whole batch is rejected: "classified as command; use the command tool", or, for a
-   batch, each statement that doesn't fit.
+   batch, each statement that doesn't fit. When the server has no tool for that category
+   (`ToolCatalog.Categories`), the reason says so instead: "classified as command; this server has no command
+   tool yet".
 
 Because the walk is an allowlist, syntax nobody has seen yet, including node types added by a future ScriptDom
 version, is rejected until someone allows it on purpose. This fails closed.

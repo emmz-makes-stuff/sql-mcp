@@ -73,8 +73,12 @@ Statements whose effect can't be determined by parsing SHALL be rejected by ever
 - **THEN** it is rejected, because dynamic SQL can't be classified
 
 ### Requirement: Classification is tied to the tool
-Each tool SHALL run only statements classified into its own category. A statement of another category SHALL be rejected, with a reason that names the category found and the tool that would accept it.
+Each tool SHALL run only statements classified into its own category. A statement of another category SHALL be rejected, with a reason that names the category found and the tool that would accept it, or, when the server has no tool for that category yet, says so.
 
 #### Scenario: Wrong tool
-- **WHEN** the query tool is given `DELETE FROM t`
+- **WHEN** the query tool is given `DELETE FROM t`, and the server has a command tool
 - **THEN** it is rejected, with the reason "classified as command; use the command tool"
+
+#### Scenario: No tool for that category yet
+- **WHEN** the query tool is given `DELETE FROM t`, and the server has no command tool
+- **THEN** it is rejected, with the reason "classified as command; this server has no command tool yet"

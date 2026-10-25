@@ -61,7 +61,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
 
         var engine = session.Engines[db.Entry.Engine];
         var classification = engine.Classifier.Classify(sql);
-        var verdict = classification.ForTool(StatementCategory.Query);
+        var verdict = classification.ForTool(StatementCategory.Query, ToolCatalog.Categories);
         if (!verdict.Accepted)
         {
             var reason = $"Rejected, nothing was sent to the database: {verdict.Reason}";

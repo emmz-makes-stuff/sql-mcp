@@ -5,23 +5,15 @@ namespace SqlMcp.Audit;
 /// <summary>
 /// An audit event. Every subtype is deliberately limited to fields that can't carry result values, connection
 /// strings or secrets (spec: no result data or secrets in the log). <c>AuditEventShapeTests</c> enforces this.
+/// <see cref="EventType"/> is a constructor argument, not an override: System.Text.Json doesn't apply
+/// <c>[JsonIgnore]</c> on an abstract property to its overrides, so they were logged again as <c>event_type</c>.
 /// </summary>
-internal abstract record AuditEvent
-{
-    [JsonIgnore]
-    public abstract string EventType { get; }
-}
+internal abstract record AuditEvent([property: JsonIgnore] string EventType);
 
 /// <summary>The first event in every log. <see cref="LogPath"/> says where the log went, fallback or not.</summary>
-internal sealed record SessionStartEvent(string Version, IReadOnlyList<string> ConfigFiles, string LogPath, int Pid) : AuditEvent
-{
-    public override string EventType => "session_start";
-}
+internal sealed record SessionStartEvent(string Version, IReadOnlyList<string> ConfigFiles, string LogPath, int Pid) : AuditEvent("session_start");
 
-internal sealed record SessionEndEvent(string Version, IReadOnlyList<string> ConfigFiles) : AuditEvent
-{
-    public override string EventType => "session_end";
-}
+internal sealed record SessionEndEvent(string Version, IReadOnlyList<string> ConfigFiles) : AuditEvent("session_end");
 
 /// <summary>A batch that ran. <see cref="Rows"/> is a count of rows returned or affected, never their values.</summary>
 internal sealed record ExecutedEvent(
@@ -31,16 +23,10 @@ internal sealed record ExecutedEvent(
     IReadOnlyList<string> Classification,
     long DurationMs,
     long Rows,
-    bool Truncated) : AuditEvent
-{
-    public override string EventType => "executed";
-}
+    bool Truncated) : AuditEvent("executed");
 
 /// <summary>A call refused before anything ran. <see cref="Source"/> says where a permission denial came from.</summary>
-internal sealed record DeniedEvent(string Tool, string? Database, string? Sql, string Reason, string? Source = null) : AuditEvent
-{
-    public override string EventType => "denied";
-}
+internal sealed record DeniedEvent(string Tool, string? Database, string? Sql, string Reason, string? Source = null) : AuditEvent("denied");
 
 internal enum FailureKind
 {
@@ -62,13 +48,7 @@ internal sealed record FailedEvent(
     int? ErrorNumber,
     int? Severity,
     int? State,
-    long DurationMs) : AuditEvent
-{
-    public override string EventType => "failed";
-}
+    long DurationMs) : AuditEvent("failed");
 
 /// <summary>An introspection call (used by the introspection change). <see cref="Target"/> is an object name.</summary>
-internal sealed record IntrospectionEvent(string Tool, string Database, string? Target) : AuditEvent
-{
-    public override string EventType => "introspection";
-}
+internal sealed record IntrospectionEvent(string Tool, string Database, string? Target) : AuditEvent("introspection");

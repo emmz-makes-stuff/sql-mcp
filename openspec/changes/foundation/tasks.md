@@ -65,8 +65,8 @@
 
 ## 11. Review fixes: E2E findings
 
-- [ ] 11.1 Write each audit event's type once, as `event`: the overridden `EventType` properties are serialised as a duplicate `event_type` despite `[JsonIgnore]` on the abstract base. Make it one non-virtual `[JsonIgnore]` property set through the base record's constructor; verify with a test that every event subtype serialises with `event` and without `event_type`
-- [ ] 11.2 When a statement's category has no tool in this release, make the wrong-tool refusal say so ("classified as command; this server has no command tool yet") rather than "use the command tool"; add the scenario to `specs/statement-classification/spec.md`; verify with classifier and tool-pipeline tests, and that `make validate` stays green
+- [x] 11.1 Write each audit event's type once, as `event`: the overridden `EventType` properties are serialised as a duplicate `event_type` despite `[JsonIgnore]` on the abstract base. Make it one non-virtual `[JsonIgnore]` property set through the base record's constructor; verify with a test that every event subtype serialises with `event` and without `event_type`
+- [x] 11.2 When a statement's category has no tool in this release, make the wrong-tool refusal say so ("classified as command; this server has no command tool yet") rather than "use the command tool"; add the scenario to `specs/statement-classification/spec.md`; verify with classifier and tool-pipeline tests, and that `make validate` stays green
 
 ## Workflow follow-up
 

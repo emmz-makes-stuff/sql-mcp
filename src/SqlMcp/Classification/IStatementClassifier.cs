@@ -54,9 +54,10 @@ internal sealed record ClassificationResult(IReadOnlyList<StatementClassificatio
 {
     /// <summary>
     /// Accepts the batch for the tool of <paramref name="tool"/> only if every statement is in that category.
-    /// Otherwise the whole batch is rejected, naming each statement that doesn't fit.
+    /// Otherwise the whole batch is rejected, naming each statement that doesn't fit and the tool that would run
+    /// it, or, if it isn't in <paramref name="withTools"/>, that the server has no such tool yet.
     /// </summary>
-    public BatchVerdict ForTool(StatementCategory tool)
+    public BatchVerdict ForTool(StatementCategory tool, IReadOnlySet<StatementCategory> withTools)
     {
         if (tool == StatementCategory.Rejected)
         {
@@ -77,15 +78,24 @@ internal sealed record ClassificationResult(IReadOnlyList<StatementClassificatio
         if (Statements.Count == 1)
         {
             var only = misfits[0];
-            return BatchVerdict.Reject(only.Category == StatementCategory.Rejected ? only.Reason! : Describe(only));
+            return BatchVerdict.Reject(only.Category == StatementCategory.Rejected ? only.Reason! : Describe(only, withTools));
         }
 
         var details = misfits.Select(s =>
-            $"statement {s.Number.ToString(CultureInfo.InvariantCulture)} (line {s.Line.ToString(CultureInfo.InvariantCulture)}) {Describe(s)}");
+            $"statement {s.Number.ToString(CultureInfo.InvariantCulture)} (line {s.Line.ToString(CultureInfo.InvariantCulture)}) {Describe(s, withTools)}");
         return BatchVerdict.Reject($"{string.Join("; ", details)}. The whole batch is rejected, so nothing in it runs.");
     }
 
-    private static string Describe(StatementClassification statement) => statement.Category == StatementCategory.Rejected
-        ? $"is rejected: {statement.Reason}"
-        : $"classified as {statement.Category.ToName()}; use the {statement.Category.ToName()} tool";
+    private static string Describe(StatementClassification statement, IReadOnlySet<StatementCategory> withTools)
+    {
+        if (statement.Category == StatementCategory.Rejected)
+        {
+            return $"is rejected: {statement.Reason}";
+        }
+
+        var name = statement.Category.ToName();
+        return withTools.Contains(statement.Category)
+            ? $"classified as {name}; use the {name} tool"
+            : $"classified as {name}; this server has no {name} tool yet";
+    }
 }
