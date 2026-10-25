@@ -1,0 +1,362 @@
+using System.Text.Json.Nodes;
+using SqlMcp.Audit;
+using SqlMcp.Execution;
+using SqlMcp.Mcp;
+using SqlMcp.Permissions;
+
+namespace SqlMcp.Tests.Mcp;
+
+public sealed class ToolPipelineTests : IDisposable
+{
+    private const string Sales = "sqlhost:1433/sales";
+    private const string OneDatabase = """{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales;Password=s3cret" } ] }""";
+
+    private readonly SessionBuilder _builder = new();
+
+    private static CancellationToken Cancel => TestContext.Current.CancellationToken;
+
+    public void Dispose() => _builder.Dispose();
+
+    [Fact]
+    public void Listing_shows_provenance()
+    {
+        // The user denies command; the project allows it and ddl, but isn't approved.
+        _builder
+            .User("""{ "defaults": { "deny": ["command"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""")
+            .Project("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command", "ddl"] } ] }""");
+        using var session = _builder.Build();
+
+        var listing = Json(new ToolPipeline(session).ListDatabases());
+
+        var db = Assert.Single(listing["databases"]!.AsArray())!;
+        Assert.Equal(Sales, db["id"]!.GetValue<string>());
+        Assert.True(db["available"]!.GetValue<bool>());
+        Assert.Equal(["query:default", "introspection:default"], Groups(db["allowed"]!));
+        Assert.Equal(["command:project config not approved", "ddl:project config not approved", "execute:default"], Groups(db["denied"]!));
+
+        var ddl = db["denied"]!.AsArray().Single(g => g!["group"]!.GetValue<string>() == "ddl")!;
+        Assert.Equal(ApprovalMessages.NotApproved(ApprovalMessages.Grants(ToolGroup.Ddl)), ddl["reason"]!.GetValue<string>());
+
+        Assert.Equal(ApprovalMessages.NotApproved("grants command, grants ddl"), db["not_approved"]!.GetValue<string>());
+        Assert.Equal(1000, db["limits"]!["max_rows"]!.GetValue<int>());
+        Assert.Equal(5 * 1024 * 1024, db["limits"]!["max_bytes"]!.GetValue<long>());
+        Assert.Equal(100, db["limits"]!["page_size"]!.GetValue<int>());
+        Assert.Equal(30, db["limits"]!["timeout_seconds"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void An_ignored_limit_raise_is_listed_in_the_approval_wording()
+    {
+        _builder
+            .User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""")
+            .Project("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "maxRows": 5000 } } ] }""");
+        using var session = _builder.Build();
+
+        var db = Assert.Single(Json(new ToolPipeline(session).ListDatabases())["databases"]!.AsArray())!;
+
+        Assert.Equal(1000, db["limits"]!["max_rows"]!.GetValue<int>());
+        var notApproved = db["not_approved"]!.GetValue<string>();
+        Assert.Equal(ApprovalMessages.NotApproved(ApprovalMessages.Raises("maxRows")), notApproved);
+        Assert.Contains(ApprovalMessages.AskTheUser, notApproved, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unavailable_database()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales;User ID=app;Password=${env:SALES_PASSWORD}" } ] }""");
+        using var session = _builder.Build();
+
+        var result = new ToolPipeline(session).ListDatabases();
+
+        var db = Assert.Single(Json(result)["databases"]!.AsArray())!;
+        Assert.False(db["available"]!.GetValue<bool>());
+        Assert.Contains("SALES_PASSWORD", db["unavailable_reason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Server=", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("User ID", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task An_unavailable_database_is_never_connected_to()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales;Password=${env:SALES_PASSWORD}" } ] }""");
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "SELECT 1 AS n", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith($"{Sales} is unavailable:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("SALES_PASSWORD", result.Text, StringComparison.Ordinal);
+        Assert.Empty(_builder.Executor.Calls);
+    }
+
+    [Fact]
+    public void Connection_strings_never_appear_in_the_listing()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var text = new ToolPipeline(session).ListDatabases().Text;
+
+        Assert.DoesNotContain("s3cret", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Server=", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void No_databases()
+    {
+        using var session = _builder.Build();
+
+        var listing = Json(new ToolPipeline(session).ListDatabases());
+
+        Assert.Empty(listing["databases"]!.AsArray());
+        Assert.Equal(session.NoDatabasesMessage, listing["message"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Denied_group()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "deny": ["query"] } ] }""");
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "SELECT 1 AS n", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal($"query is denied on {Sales} (source: user config).", result.Text);
+        Assert.Empty(_builder.Executor.Calls);
+
+        var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
+        Assert.Equal("query", denied["tool"]!.GetValue<string>());
+        Assert.Equal(Sales, denied["database"]!.GetValue<string>());
+        Assert.Equal("user config", denied["source"]!.GetValue<string>());
+        Assert.Equal(result.Text, denied["reason"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task An_unapproved_denial_asks_the_user_and_not_the_agent()
+    {
+        _builder
+            .User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "deny": ["query"] } ] }""")
+            .Project("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["query"] } ] }""");
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "SELECT 1 AS n", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal(
+            $"query is denied on {Sales} (source: project config not approved). {ApprovalMessages.NotApproved(ApprovalMessages.Grants(ToolGroup.Query))}",
+            result.Text);
+        Assert.Contains(ApprovalMessages.AskTheUser, result.Text, StringComparison.Ordinal);
+        Assert.Empty(_builder.Executor.Calls);
+        var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
+        Assert.Equal("project config not approved", denied["source"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Unknown_identifier_in_a_tool_call()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync("otherhost:1433/sales", "SELECT 1 AS n", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal($"Unknown database \"otherhost:1433/sales\". Known databases: {Sales}.", result.Text);
+        Assert.Empty(_builder.Executor.Calls);
+    }
+
+    [Fact]
+    public async Task Identifiers_match_case_insensitively()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync("SQLHOST:1433/Sales", "SELECT 1 AS n", Cancel);
+
+        Assert.False(result.IsError, result.Text);
+    }
+
+    [Fact]
+    public async Task Rejected_statement()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("Rejected, nothing was sent to the database: classified as command; use the command tool", result.Text);
+        Assert.Empty(_builder.Executor.Calls);
+
+        var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
+        Assert.Equal("DELETE FROM dbo.users", denied["sql"]!.GetValue<string>());
+        Assert.Equal(result.Text, denied["reason"]!.GetValue<string>());
+        Assert.Null(denied["source"]);
+    }
+
+    [Fact]
+    public async Task Successful_query_then_every_page()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Outcome = new QuerySucceeded(Rows(250), TimeSpan.FromMilliseconds(12));
+        using var session = _builder.Build();
+        var pipeline = new ToolPipeline(session);
+
+        var first = Json(await pipeline.QueryAsync(Sales, "SELECT id, name FROM dbo.users", Cancel));
+
+        Assert.Equal(["SELECT id, name FROM dbo.users"], _builder.Executor.Calls);
+        Assert.Equal(250, first["rows_buffered"]!.GetValue<int>());
+        Assert.False(first["truncated"]!.GetValue<bool>());
+        Assert.Equal(1, first["result_sets"]!.GetValue<int>());
+        Assert.Equal("""[{"name":"id","type":"int"},{"name":"name","type":"nvarchar(50)"}]""", first["columns"]!.ToJsonString());
+        Assert.Equal((1, 100, 3), (first["first_row"]!.GetValue<int>(), first["last_row"]!.GetValue<int>(), first["pages"]!.GetValue<int>()));
+        Assert.False(first["last_page"]!.GetValue<bool>());
+        var handle = first["handle"]!.GetValue<string>();
+
+        var second = Json(pipeline.NextPage(handle));
+        Assert.Equal(101, second["first_row"]!.GetValue<int>());
+        Assert.Null(second["rows_buffered"]);
+
+        var third = Json(pipeline.NextPage(handle));
+        Assert.Equal((201, 250), (third["first_row"]!.GetValue<int>(), third["last_row"]!.GetValue<int>()));
+        Assert.True(third["last_page"]!.GetValue<bool>());
+        Assert.Null(third["handle"]);
+
+        var gone = pipeline.NextPage(handle);
+        Assert.True(gone.IsError);
+        Assert.Equal(ResultStore.UnknownHandleMessage, gone.Text);
+    }
+
+    [Fact]
+    public async Task Executed_event_has_counts_and_no_values()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Outcome = new QuerySucceeded(Rows(3), TimeSpan.FromMilliseconds(12));
+        using var session = _builder.Build();
+
+        await new ToolPipeline(session).QueryAsync(Sales, "SELECT id, name FROM dbo.users", Cancel);
+
+        var executed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "executed");
+        Assert.Equal("query", executed["tool"]!.GetValue<string>());
+        Assert.Equal(Sales, executed["database"]!.GetValue<string>());
+        Assert.Equal("""["query"]""", executed["classification"]!.ToJsonString());
+        Assert.Equal(3, executed["rows"]!.GetValue<long>());
+        Assert.Equal(12, executed["duration_ms"]!.GetValue<long>());
+        Assert.False(executed["truncated"]!.GetValue<bool>());
+
+        var log = File.ReadAllText(session.Audit.FilePath!);
+        Assert.DoesNotContain("user-2", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("s3cret", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Truncation_is_reported_on_the_first_page()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Outcome = new QuerySucceeded(Rows(5) with { Truncated = true, TruncationMessage = "result truncated: narrow it" }, TimeSpan.Zero);
+        using var session = _builder.Build();
+
+        var first = Json(await new ToolPipeline(session).QueryAsync(Sales, "SELECT id, name FROM dbo.users", Cancel));
+
+        Assert.True(first["truncated"]!.GetValue<bool>());
+        Assert.Equal("result truncated: narrow it", first["truncation_message"]!.GetValue<string>());
+        Assert.True(SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "executed")["truncated"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task Failed_query_returns_the_message_but_audits_only_the_numbers()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Outcome = new QueryFailed(
+            FailureKind.Sql, "Conversion failed when converting the varchar value 'alice@example.com' to data type int.", 245, 16, 1, TimeSpan.FromMilliseconds(3));
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "SELECT CAST(email AS int) AS n FROM dbo.users", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Contains("alice@example.com", result.Text, StringComparison.Ordinal);
+        var failed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal(245, failed["error_number"]!.GetValue<int>());
+        Assert.Equal("sql", failed["kind"]!.GetValue<string>());
+        Assert.DoesNotContain("alice@example.com", File.ReadAllText(session.Audit.FilePath!), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_cancelled_query_is_still_audited()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Cancels = true;
+        using var session = _builder.Build();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new ToolPipeline(session).QueryAsync(Sales, "SELECT id FROM dbo.users", Cancel));
+
+        var failed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal("other", failed["kind"]!.GetValue<string>());
+        Assert.Equal("SELECT id FROM dbo.users", failed["sql"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Abandon_releases_the_handle()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Outcome = new QuerySucceeded(Rows(250), TimeSpan.Zero);
+        using var session = _builder.Build();
+        var pipeline = new ToolPipeline(session);
+        var handle = Json(await pipeline.QueryAsync(Sales, "SELECT id, name FROM dbo.users", Cancel))["handle"]!.GetValue<string>();
+
+        Assert.Equal("""{"released":true}""", pipeline.Abandon(handle).Text);
+
+        Assert.Equal(ResultStore.UnknownHandleMessage, pipeline.NextPage(handle).Text);
+        Assert.Equal(ResultStore.UnknownHandleMessage, pipeline.Abandon(handle).Text);
+    }
+
+    [Fact]
+    public async Task Audit_log_unavailable()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+        session.Audit.Dispose();
+        var pipeline = new ToolPipeline(session);
+
+        Assert.Equal(AuditLog.UnavailableMessage, pipeline.ListDatabases().Text);
+        Assert.Equal(AuditLog.UnavailableMessage, (await pipeline.QueryAsync(Sales, "SELECT 1 AS n", Cancel)).Text);
+        Assert.Equal(AuditLog.UnavailableMessage, pipeline.NextPage("x").Text);
+        Assert.Equal(AuditLog.UnavailableMessage, pipeline.Abandon("x").Text);
+        Assert.Empty(_builder.Executor.Calls);
+    }
+
+    [Fact]
+    public async Task Invalid_config_is_reported_by_every_tool()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["admin"] } ] }""");
+        using var session = _builder.Build();
+        var pipeline = new ToolPipeline(session);
+
+        var listing = pipeline.ListDatabases();
+        var query = await pipeline.QueryAsync(Sales, "SELECT 1 AS n", Cancel);
+
+        Assert.True(listing.IsError);
+        Assert.Contains("$.databases[0].allow[0]", listing.Text, StringComparison.Ordinal);
+        Assert.Contains("Ask the user to fix it", listing.Text, StringComparison.Ordinal);
+        Assert.Equal(listing.Text, query.Text);
+        Assert.Empty(_builder.Executor.Calls);
+        Assert.Equal([_builder.Paths.UserConfig], session.ConfigFiles);
+    }
+
+    private static JsonObject Json(ToolResult result)
+    {
+        Assert.False(result.IsError, result.Text);
+        return JsonNode.Parse(result.Text)!.AsObject();
+    }
+
+    private static List<string> Groups(JsonNode groups) =>
+        [.. groups.AsArray().Select(g => $"{g!["group"]!.GetValue<string>()}:{g["source"]!.GetValue<string>()}")];
+
+    private static BufferedResult Rows(int count) => new(
+        [
+            new ResultSet(
+                [new ResultColumn("id", "int"), new ResultColumn("name", "nvarchar(50)")],
+                [.. Enumerable.Range(1, count).Select(i => new JsonNode?[] { JsonValue.Create(i), JsonValue.Create($"user-{i}") })]),
+        ],
+        false,
+        null);
+}

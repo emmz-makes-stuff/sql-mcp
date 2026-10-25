@@ -113,7 +113,7 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
                     var rowBytes = SizeOf(row);
                     if (byteCount + rowBytes > limits.MaxBytes)
                     {
-                        truncation = TruncationMessage($"the {FormatBytes(limits.MaxBytes)} cap", rowCount, sets.Count - 1);
+                        truncation = TruncationMessage($"the {ByteSize.Format(limits.MaxBytes)} cap", rowCount, sets.Count - 1);
                         break;
                     }
 
@@ -195,13 +195,6 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
     private static string TruncationMessage(string cap, int rows, int resultSet) => string.Create(
         CultureInfo.InvariantCulture,
         $"result truncated: {cap} was reached after {rows} rows, in result set {resultSet}, and nothing after it was read. Narrow the query: add filters, select fewer columns, or use TOP.");
-
-    private static string FormatBytes(long bytes) => bytes switch
-    {
-        _ when bytes % (1024 * 1024) == 0 => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024 * 1024)} MB"),
-        _ when bytes % 1024 == 0 => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1024} KB"),
-        _ => string.Create(CultureInfo.InvariantCulture, $"{bytes}-byte"),
-    };
 
     private static QueryFailed Failed(FailureKind kind, string message, SqlException ex, TimeSpan duration) =>
         new(kind, message, ex.Number, ex.Class, ex.State, duration);

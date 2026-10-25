@@ -39,9 +39,9 @@
 
 ## 7. MCP server and tools
 
-- [ ] 7.1 Implement `serve`: Generic Host, stdio transport, all logs to stderr, config, permissions and audit wired in, and `session_start`/`session_end` events; verify with an integration test that starts the tool as a child process, sends `initialize` through the MCP SDK client, and gets a tool list (the "Started by a client" scenario)
-- [ ] 7.2 Implement the `list_databases` tool and the call pipeline (audit check → resolve db → permission → availability → classify → execute, auditing each outcome); verify with unit tests for "Listing shows provenance", "Unavailable database", "Denied group" and "Unknown identifier in a tool call", asserting that every unapproved-config denial uses `ApprovalMessages` and never invites the agent to run `approve`
-- [ ] 7.3 Implement the `query`, `next_page` and `abandon` tools with the guidance in their descriptions, and register tools only for permitted groups; verify with unit tests for "Agent reads the tool description" and "No database allows command", and an end-to-end integration test for "Successful query" and "Rejected statement" (including the audit events written)
+- [x] 7.1 Implement `serve`: Generic Host, stdio transport, all logs to stderr, config, permissions and audit wired in, and `session_start`/`session_end` events; verify with an integration test that starts the tool as a child process, sends `initialize` through the MCP SDK client, and gets a tool list (the "Started by a client" scenario)
+- [x] 7.2 Implement the `list_databases` tool and the call pipeline (audit check → resolve db → permission → availability → classify → execute, auditing each outcome); verify with unit tests for "Listing shows provenance", "Unavailable database", "Denied group" and "Unknown identifier in a tool call", asserting that every unapproved-config denial uses `ApprovalMessages` and never invites the agent to run `approve`
+- [x] 7.3 Implement the `query`, `next_page` and `abandon` tools with the guidance in their descriptions, and register tools only for permitted groups; verify with unit tests for "Agent reads the tool description" and "No database allows command", and an end-to-end integration test for "Successful query" and "Rejected statement" (including the audit events written)
 
 ## 8. CLI
 

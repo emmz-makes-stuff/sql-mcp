@@ -17,7 +17,10 @@
   <ItemGroup>
     <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="System.CommandLine" />
   </ItemGroup>
 
   <ItemGroup>
