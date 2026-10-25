@@ -189,10 +189,16 @@ internal static class ConfigLoader
     }
 
     private static LimitSettings MapLimits(JsonElement element) => new(
-        element.TryGetProperty("maxRows", out var rows) ? rows.GetInt32() : null,
-        element.TryGetProperty("maxBytes", out var bytes) ? bytes.GetInt64() : null,
-        element.TryGetProperty("pageSize", out var page) ? page.GetInt32() : null,
-        element.TryGetProperty("timeoutSeconds", out var timeout) ? timeout.GetInt32() : null);
+        element.TryGetProperty("maxRows", out var rows) ? (int)WholeNumber(rows) : null,
+        element.TryGetProperty("maxBytes", out var bytes) ? WholeNumber(bytes) : null,
+        element.TryGetProperty("pageSize", out var page) ? (int)WholeNumber(page) : null,
+        element.TryGetProperty("timeoutSeconds", out var timeout) ? (int)WholeNumber(timeout) : null);
+
+    /// <summary>
+    /// A limit the schema has already checked is an integer in range. JSON Schema counts <c>100.0</c> and <c>1e3</c>
+    /// as integers, which <see cref="JsonElement.GetInt64"/> rejects, so those are read as decimals.
+    /// </summary>
+    private static long WholeNumber(JsonElement value) => value.TryGetInt64(out var number) ? number : (long)value.GetDecimal();
 
     private static void CheckDuplicates(ConfigFile file)
     {

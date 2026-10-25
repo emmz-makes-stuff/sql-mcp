@@ -120,6 +120,36 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void Whole_number_limits_written_as_decimals_are_read_as_integers()
+    {
+        const string text = """{ "defaults": { "limits": { "maxRows": 100.0, "maxBytes": 1e6, "pageSize": 10.00 } } }""";
+
+        var file = ConfigLoader.Parse("config.json", text, NoVariables);
+
+        Assert.Equal(new LimitSettings(100, 1_000_000, 10, null), file.Defaults.Limits);
+    }
+
+    [Fact]
+    public void A_limit_too_large_to_hold_is_a_config_error_with_its_path()
+    {
+        const string text = """{ "defaults": { "limits": { "maxRows": 3000000000 } } }""";
+
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse("/p/config.json", text, NoVariables));
+
+        Assert.StartsWith("/p/config.json: $.defaults.limits.maxRows: ", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_fractional_limit_is_a_config_error_with_its_path()
+    {
+        const string text = """{ "defaults": { "limits": { "pageSize": 10.5 } } }""";
+
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse("/p/config.json", text, NoVariables));
+
+        Assert.StartsWith("/p/config.json: $.defaults.limits.pageSize: ", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Embedded_schema_is_the_published_file()
     {
         var published = File.ReadAllText(Path.Combine(RepoRoot(), "src", "SqlMcp", "schema", "config.schema.json"));

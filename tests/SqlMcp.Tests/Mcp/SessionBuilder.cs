@@ -18,9 +18,17 @@ internal sealed class FakeExecutor : IQueryExecutor
     /// <summary>When set, the call is cancelled as if the client gave up while the batch ran.</summary>
     public bool Cancels { get; set; }
 
+    /// <summary>When set, the call throws this, as an executor bug or an unreadable value would.</summary>
+    public Exception? Throws { get; set; }
+
     public Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, EffectiveLimits limits, CancellationToken cancellationToken)
     {
         Calls.Add(sql);
+        if (Throws is not null)
+        {
+            return Task.FromException<QueryOutcome>(Throws);
+        }
+
         return Cancels ? Task.FromCanceled<QueryOutcome>(new CancellationToken(canceled: true)) : Task.FromResult(Outcome);
     }
 }

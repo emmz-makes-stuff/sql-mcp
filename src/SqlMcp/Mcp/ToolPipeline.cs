@@ -81,6 +81,14 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             session.Audit.Write(new FailedEvent(ToolNames.Query, db.Identifier, sql, FailureKind.Other, null, null, null, elapsed));
             throw;
         }
+        catch (Exception ex)
+        {
+            // Executors report failures as outcomes, but anything that escapes one (a value no converter can read,
+            // a connection option the platform can't use) must still be audited before the agent hears of it.
+            var elapsed = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            var failure = new FailedEvent(ToolNames.Query, db.Identifier, sql, FailureKind.Other, null, null, null, elapsed);
+            return Audited(failure, ToolResult.Error($"query failed: {ex.Message}"));
+        }
 
         var durationMs = (long)outcome.Duration.TotalMilliseconds;
         switch (outcome)

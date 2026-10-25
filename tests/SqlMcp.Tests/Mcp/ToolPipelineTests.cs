@@ -312,6 +312,22 @@ public sealed class ToolPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task An_exception_from_the_executor_is_audited_and_reported()
+    {
+        _builder.User(OneDatabase);
+        _builder.Executor.Throws = new InvalidCastException("Unable to cast object of type 'System.Byte[]'.");
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "SELECT id FROM dbo.users", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("query failed: Unable to cast object of type 'System.Byte[]'.", result.Text);
+        var failed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal("other", failed["kind"]!.GetValue<string>());
+        Assert.Equal("SELECT id FROM dbo.users", failed["sql"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Abandon_releases_the_handle()
     {
         _builder.User(OneDatabase);

@@ -88,6 +88,7 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         string? truncation = null;
 
         var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var completed = false;
         try
         {
             do
@@ -123,22 +124,26 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
                 }
             }
             while (truncation is null && await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
+
+            completed = true;
         }
         finally
         {
-            await CloseReaderAsync(command, reader, cancelled: truncation is not null).ConfigureAwait(false);
+            // After a cap, or an exception part-way, the rest of the stream is unread: cancel rather than drain it.
+            await CloseReaderAsync(command, reader, cancel: !completed || truncation is not null).ConfigureAwait(false);
         }
 
         return new BufferedResult(sets, truncation is not null, truncation);
     }
 
     /// <summary>
-    /// Closes the reader. After a cap, the command is cancelled first, so the server stops sending rows and later
-    /// result sets are never read (2026-10-25 decision); the cancellation error that closing then raises is expected.
+    /// Closes the reader. After a cap or an exception, the command is cancelled first, so the server stops sending rows
+    /// and later result sets are never read (2026-10-25 decision); without it, disposing the reader drains the whole
+    /// stream. The cancellation error that closing then raises is expected.
     /// </summary>
-    private static async Task CloseReaderAsync(SqlCommand command, SqlDataReader reader, bool cancelled)
+    private static async Task CloseReaderAsync(SqlCommand command, SqlDataReader reader, bool cancel)
     {
-        if (!cancelled)
+        if (!cancel)
         {
             await reader.DisposeAsync().ConfigureAwait(false);
             return;
@@ -149,7 +154,7 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         {
             await reader.DisposeAsync().ConfigureAwait(false);
         }
-        catch (SqlException)
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
         {
             // The server acknowledges the cancel with "operation cancelled by user".
         }

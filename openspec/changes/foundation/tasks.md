@@ -80,9 +80,9 @@
 
 ## 14. Review fixes: errors that escape
 
-- [ ] 14.1 In `SqlServerQueryExecutor`, turn non-`SqlException` failures after the call starts (`InvalidCastException` and the like from reading a row, `InvalidOperationException` from `OpenAsync`) into a `QueryFailed`, so the pipeline audits a `failed` event. Verify with a test where the executor throws, checking that the audit log has the event
-- [ ] 14.2 When `BufferAsync` exits through an exception, cancel the command before disposing the reader, so SqlClient doesn't read the rest of the stream. Verify with an integration test that cancels a long SELECT and returns quickly
-- [ ] 14.3 Give the schema's integer limits a `maximum` (Int32, or Int64 for `maxBytes`), and turn a non-integer value into a `ConfigException` naming the file and JSON path rather than a `FormatException`. Verify with loader tests for `100.0` and `3000000000`
+- [x] 14.1 In `SqlServerQueryExecutor`, turn non-`SqlException` failures after the call starts (`InvalidCastException` and the like from reading a row, `InvalidOperationException` from `OpenAsync`) into a `QueryFailed`, so the pipeline audits a `failed` event. Verify with a test where the executor throws, checking that the audit log has the event
+- [x] 14.2 When `BufferAsync` exits through an exception, cancel the command before disposing the reader, so SqlClient doesn't read the rest of the stream. Verify with an integration test that cancels a long SELECT and returns quickly
+- [x] 14.3 Give the schema's integer limits a `maximum` (Int32, or Int64 for `maxBytes`), and turn a non-integer value into a `ConfigException` naming the file and JSON path rather than a `FormatException`. Verify with loader tests for `100.0` and `3000000000`
 - [x] 14.4 Stop `approve`'s diff from crashing on two `(invalid)` entries: pair the before and after databases without keying on the identifier. Verify with an approve test that has two invalid entries
 
 ## 15. Review fixes: memory bounds

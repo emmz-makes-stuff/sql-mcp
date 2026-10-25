@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using SqlMcp.Audit;
@@ -225,6 +226,30 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
         var failed = Assert.IsType<QueryFailed>(outcome);
         Assert.Equal(FailureKind.Connection, failed.Kind);
         Assert.StartsWith("could not connect", failed.Message, StringComparison.Ordinal);
+    }
+
+    [Fact(Timeout = 60_000)]
+    public async Task A_cancelled_query_returns_promptly()
+    {
+        // Billions of rows, and caps that never bite: only the cancel can stop it, and it must stop it promptly. (SqlClient
+        // cancels the command itself when the token fires; the executor's own cancel-before-dispose covers exceptions
+        // that aren't cancellations, which SQL alone can't provoke.)
+        const string sql = "SELECT a.object_id FROM sys.all_columns a CROSS JOIN sys.all_columns b CROSS JOIN sys.all_columns c";
+        var limits = EffectiveLimits.Default with { MaxRows = int.MaxValue, MaxBytes = long.MaxValue, TimeoutSeconds = 600 };
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cancellation.CancelAfter(TimeSpan.FromMilliseconds(500));
+        var started = Stopwatch.GetTimestamp();
+
+        try
+        {
+            await _executor.ExecuteAsync(db.ConnectionString, sql, limits, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected; SqlClient may instead report the cancel as a failed outcome.
+        }
+
+        Assert.InRange(Stopwatch.GetElapsedTime(started), TimeSpan.Zero, TimeSpan.FromSeconds(10));
     }
 
     private Task<QueryOutcome> Run(string sql, EffectiveLimits? limits = null) =>
