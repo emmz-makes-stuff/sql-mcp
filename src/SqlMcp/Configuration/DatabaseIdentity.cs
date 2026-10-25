@@ -128,14 +128,34 @@ internal static class ConnectionStringMasker
             return "(invalid connection string)";
         }
 
-        foreach (var key in builder.Keys.Cast<string>().ToList())
+        foreach (var key in LiteralSecretKeys(builder))
         {
-            if (SecretKeys.Contains(key.ToLowerInvariant()) && builder[key] is string value && !EnvSubstitution.IsOnlyReference(value))
-            {
-                builder[key] = Mask;
-            }
+            builder[key] = Mask;
         }
 
         return builder.ConnectionString;
     }
+
+    /// <summary>True when a password is written out rather than given as a whole <c>${env:NAME}</c> reference.</summary>
+    public static bool HasLiteralSecret(string rawConnectionString)
+    {
+        var builder = new DbConnectionStringBuilder();
+        try
+        {
+            builder.ConnectionString = rawConnectionString;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        return LiteralSecretKeys(builder).Count > 0;
+    }
+
+    private static List<string> LiteralSecretKeys(DbConnectionStringBuilder builder) =>
+        [.. builder.Keys.Cast<string>().Where(key =>
+            SecretKeys.Contains(key.ToLowerInvariant())
+            && builder[key] is string value
+            && value.Length > 0
+            && !EnvSubstitution.IsOnlyReference(value))];
 }

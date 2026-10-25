@@ -45,13 +45,13 @@
 
 ## 8. CLI
 
-- [ ] 8.1 Implement the System.CommandLine root, exit-code handling, and `init`; verify with unit tests for "Fresh project", "Already initialised" and "Invalid config" (exit code non-zero)
-- [ ] 8.2 Implement the JSONC splice editor (design D5) with temp-file-and-rename writes; verify with round-trip unit tests that keep comments and trailing commas, and re-validate against the schema after each edit
-- [ ] 8.3 Implement `db add|remove`, `allow|deny` (with `--db` and `--user`) and `config show`, masking secrets; verify with unit tests for "Add a database", "Allow a group" and "Show effective config"
-- [ ] 8.4 Implement `approve` (refuse unless both stdin and stdout are a terminal, show the widening diff, require the project directory's name to be typed, no skip flag), with terminal detection behind an injectable abstraction for tests; verify with unit tests for "Interactive approval", "Wrong confirmation", "Nothing to approve", "Agent tries to approve" and "Skip flags are not accepted"
-- [ ] 8.5 Implement the `register` framework (process runner abstraction, launcher detection tool vs `dnx Emmz.SqlMcp@<version>`, `--scope`, `--force`, adding `--project` for project scope, printing the manual snippet on failure) plus the `claude` and `gemini` strategies; verify with unit tests against a fake runner for "Register with Claude Code", "Already registered" and "Client not installed", plus the gemini argument arrays
-- [ ] 8.6 Implement the `codex` strategy (CLI for user scope, Tomlyn edit of `.codex/config.toml` for project scope, plus the trust warning) and the `opencode` strategy (version detection, v1 and v2 JSONC shapes); verify with unit tests on fake runners and temp config files for both scopes and both OpenCode versions
-- [ ] 8.7 Document the CLI commands and the config format with a full example in the README; verify each documented command runs as written against a temp project, using the `init`, `db add`, `allow` and `config show` path
+- [x] 8.1 Implement the System.CommandLine root, exit-code handling, and `init`; verify with unit tests for "Fresh project", "Already initialised" and "Invalid config" (exit code non-zero)
+- [x] 8.2 Implement the JSONC splice editor (design D5) with temp-file-and-rename writes; verify with round-trip unit tests that keep comments and trailing commas, and re-validate against the schema after each edit
+- [x] 8.3 Implement `db add|remove`, `allow|deny` (with `--db` and `--user`) and `config show`, masking secrets; verify with unit tests for "Add a database", "Allow a group" and "Show effective config"
+- [x] 8.4 Implement `approve` (refuse unless both stdin and stdout are a terminal, show the widening diff, require the project directory's name to be typed, no skip flag), with terminal detection behind an injectable abstraction for tests; verify with unit tests for "Interactive approval", "Wrong confirmation", "Nothing to approve", "Agent tries to approve" and "Skip flags are not accepted"
+- [x] 8.5 Implement the `register` framework (process runner abstraction, launcher detection tool vs `dnx Emmz.SqlMcp@<version>`, `--scope`, `--force`, adding `--project` for project scope, printing the manual snippet on failure) plus the `claude` and `gemini` strategies; verify with unit tests against a fake runner for "Register with Claude Code", "Already registered" and "Client not installed", plus the gemini argument arrays
+- [x] 8.6 Implement the `codex` strategy (CLI for user scope, Tomlyn edit of `.codex/config.toml` for project scope, plus the trust warning) and the `opencode` strategy (version detection, v1 and v2 JSONC shapes); verify with unit tests on fake runners and temp config files for both scopes and both OpenCode versions
+- [x] 8.7 Document the CLI commands and the config format with a full example in the README; verify each documented command runs as written against a temp project, using the `init`, `db add`, `allow` and `config show` path
 
 ## 9. CI and release
 

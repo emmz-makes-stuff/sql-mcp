@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/emmz-makes-stuff/sql-mcp/main/src/SqlMcp/schema/config.schema.json",
   "title": "sql-mcp configuration",
   "description": "User-level (~/.config/sql-mcp/config.json) or project-level (.sql-mcp/config.json) configuration for sql-mcp.",
   "type": "object",

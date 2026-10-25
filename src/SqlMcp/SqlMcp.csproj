@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" />
     <PackageReference Include="ModelContextProtocol" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Tomlyn" />
   </ItemGroup>
 
   <ItemGroup>

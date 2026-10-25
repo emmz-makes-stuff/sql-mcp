@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using SqlMcp.Configuration;
 
 namespace SqlMcp.Audit;
 
@@ -71,7 +72,7 @@ internal sealed class AuditLog : IDisposable
         var sqlMcpDirectory = Path.Combine(projectDirectory, ".sql-mcp");
         if (Directory.Exists(sqlMcpDirectory))
         {
-            var stream = TryOpen(Path.Combine(sqlMcpDirectory, "logs"), name, failures, () => EnsureGitIgnore(sqlMcpDirectory));
+            var stream = TryOpen(Path.Combine(sqlMcpDirectory, "logs"), name, failures, () => ProjectLayout.EnsureGitIgnore(sqlMcpDirectory));
             if (stream is not null)
             {
                 return new AuditLog(sessionId, time, processId, stream, null);
@@ -169,16 +170,6 @@ internal sealed class AuditLog : IDisposable
         {
             failures.Add($"{directory}: {ex.Message}");
             return null;
-        }
-    }
-
-    /// <summary>Spec: the server creates <c>.sql-mcp/.gitignore</c> (containing <c>logs/</c>) when it is missing.</summary>
-    private static void EnsureGitIgnore(string sqlMcpDirectory)
-    {
-        var path = Path.Combine(sqlMcpDirectory, ".gitignore");
-        if (!File.Exists(path))
-        {
-            File.WriteAllText(path, "logs/\n");
         }
     }
 }
