@@ -34,8 +34,8 @@
 
 ## 6. Query execution
 
-- [ ] 6.1 Implement the result store (opaque handles, pages, multiple result sets, idle eviction using `TimeProvider`, release on the last page or abandon, dispose at session end); verify with unit tests for "Read every page", "Expired or unknown handle" and "Abandon"
-- [ ] 6.2 Implement the SQL Server query executor (ApplicationName, ReadCommitted transaction, CommandTimeout, buffering up to the row and byte caps across result sets, rollback in `finally`, value converters per design D7); verify with integration tests for rollback (an INSERT through the executor directly), "Timeout" (WAITFOR through the executor directly), "Result over the cap", "Connection released before paging" and "Types round-trip"
+- [x] 6.1 Implement the result store (opaque handles, pages, multiple result sets, idle eviction using `TimeProvider`, release on the last page or abandon, dispose at session end); verify with unit tests for "Read every page", "Expired or unknown handle" and "Abandon"
+- [x] 6.2 Implement the SQL Server query executor (ApplicationName, ReadCommitted transaction, CommandTimeout, buffering up to the row and byte caps across result sets, rollback in `finally`, value converters per design D7); verify with integration tests for rollback (an INSERT through the executor directly), "Timeout" (WAITFOR through the executor directly), "Result over the cap", "Connection released before paging" and "Types round-trip"
 
 ## 7. MCP server and tools
 
