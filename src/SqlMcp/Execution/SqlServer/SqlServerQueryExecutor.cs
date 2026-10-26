@@ -281,7 +281,7 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         FailureKind.AffectedRowsCap,
         string.Create(
             CultureInfo.InvariantCulture,
-            $"the batch had affected {affected} rows when it was stopped, over this database's affected-rows cap of {cap}. {NothingCommitted} Narrow the WHERE clause, or split the change into smaller batches."),
+            $"over the affected-rows cap: the statements that completed affected {affected} rows, over this database's cap of {cap}, so it was stopped. {NothingCommitted} Narrow the WHERE clause, or split the change into smaller batches."),
         null,
         null,
         null,

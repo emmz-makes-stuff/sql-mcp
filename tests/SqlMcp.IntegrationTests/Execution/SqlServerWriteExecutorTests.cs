@@ -132,10 +132,9 @@ public sealed class SqlServerWriteExecutorTests(SqlServerFixture db)
         Assert.Equal(FailureKind.AffectedRowsCap, failed.Kind);
         Assert.Equal(1000, failed.Cap);
         Assert.Equal(5000, failed.Affected);
-        Assert.Contains("affected-rows cap of 1000", failed.Message, StringComparison.Ordinal);
-        Assert.Contains("had affected 5000 rows", failed.Message, StringComparison.Ordinal);
-        Assert.Contains("nothing was committed", failed.Message, StringComparison.Ordinal);
-        Assert.Contains("Narrow the WHERE clause, or split the change", failed.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            "over the affected-rows cap: the statements that completed affected 5000 rows, over this database's cap of 1000, so it was stopped. The batch was rolled back, so nothing was committed. Narrow the WHERE clause, or split the change into smaller batches.",
+            failed.Message);
         Assert.Equal(0, await db.ScalarAsync("SELECT COUNT(*) FROM dbo.w_over WHERE touched = 1"));
     }
 

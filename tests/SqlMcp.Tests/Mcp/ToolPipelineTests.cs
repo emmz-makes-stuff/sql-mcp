@@ -549,7 +549,7 @@ public sealed class ToolPipelineTests : IDisposable
     public async Task Write_rolled_back_by_the_cap()
     {
         _builder.User(AllWrites);
-        _builder.Executor.Outcome = new QueryFailed(FailureKind.AffectedRowsCap, "the batch had affected 5000 rows … nothing was committed.", null, null, null, TimeSpan.Zero)
+        _builder.Executor.Outcome = new QueryFailed(FailureKind.AffectedRowsCap, "over the affected-rows cap: the statements that completed affected 5000 rows … nothing was committed.", null, null, null, TimeSpan.Zero)
         {
             Cap = 1000,
             Affected = 5000,
@@ -559,7 +559,7 @@ public sealed class ToolPipelineTests : IDisposable
         var result = await new ToolPipeline(session).CommandAsync(Sales, "UPDATE dbo.users SET name = 'x' WHERE id > 0", Cancel);
 
         Assert.True(result.IsError);
-        Assert.Equal("the batch had affected 5000 rows … nothing was committed.", result.Text);
+        Assert.Equal("over the affected-rows cap: the statements that completed affected 5000 rows … nothing was committed.", result.Text);
         var events = SessionBuilder.Events(session);
         Assert.DoesNotContain(events, e => e["event"]!.GetValue<string>() == "executed");
         var failed = events.Single(e => e["event"]!.GetValue<string>() == "failed");

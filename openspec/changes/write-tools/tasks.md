@@ -48,7 +48,7 @@
 
 ## 8. Review fixes: cap message
 
-- [ ] 8.1 Reword the affected-rows cap error in `SqlServerQueryExecutor.CapFailed` so the agent reads the count as exact, not a lower bound (§7.2 finding): "over the affected-rows cap: the statements that completed affected N rows, over this database's cap of C, so the batch was stopped. It was rolled back, so nothing was committed. Narrow the WHERE clause, or split the change into smaller batches." Update the assertions that pin the old text (`SqlServerWriteExecutorTests`, `ToolPipelineTests`). Verify with the "Over the cap" scenario's integration test in `make itest`
+- [x] 8.1 Reword the affected-rows cap error in `SqlServerQueryExecutor.CapFailed` so the agent reads the count as exact, not a lower bound (§7.2 finding): "over the affected-rows cap: the statements that completed affected N rows, over this database's cap of C, so the batch was stopped. It was rolled back, so nothing was committed. Narrow the WHERE clause, or split the change into smaller batches." Update the assertions that pin the old text (`SqlServerWriteExecutorTests`, `ToolPipelineTests`). Verify with the "Over the cap" scenario's integration test in `make itest`
 
 ## Workflow follow-up
 
