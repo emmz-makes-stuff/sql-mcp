@@ -111,6 +111,23 @@ public sealed class ApprovalTests : IDisposable
     }
 
     [Fact]
+    public void A_damaged_database_entry_approves_nothing()
+    {
+        var path = WriteProject("""{ "databases": [ { "connectionString": "Server=localhost,1433;Database=app" } ] }""");
+        var stored = new JsonObject
+        {
+            [ApprovalStore.CanonicalPath(path)] = new JsonObject { ["databases"] = new JsonObject { ["localhost:1433/app"] = "abc" } },
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(_store.Path)!);
+        File.WriteAllText(_store.Path, stored.ToJsonString());
+
+        var approval = _store.Read(Load(path));
+
+        Assert.False(approval.FileApproved);
+        Assert.Empty(approval.Databases);
+    }
+
+    [Fact]
     public void A_path_through_a_symbolic_link_has_the_same_key()
     {
         var path = WriteProject("""{ "databases": [] }""");

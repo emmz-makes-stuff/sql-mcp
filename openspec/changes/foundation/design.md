@@ -153,7 +153,7 @@ editing). *Rejected:* a third-party JSONC library, since none is mature on .NET.
     SqlClient can't deserialise them without the CLR assembly.
 - The **result store** maps an opaque handle (a random 128-bit value, base64url) to a buffer and a last-touched
   time. A timer evicts handles idle for longer than 10 minutes, and the whole store belongs to the session.
-- Defaults are 1000 rows, 5 MB, 100 rows per page and 30 s timeout, and each database can override them.
+- Defaults are 1000 rows, 5 MB, 100 rows per page and 30 s timeout, and each database can override them. The byte cap is at most 1 GiB (review fix §17), the most one buffered string value can hold.
 - *Rejected:* holding the reader between pages (ADR-0002).
 
 ### D8. MCP hosting and tool exposure

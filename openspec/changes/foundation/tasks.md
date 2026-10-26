@@ -97,6 +97,13 @@
 - [x] 16.3 Make `LaunchCommand.IsOnPath` use `ProgramLookup.Resolve`, so it honours PATHEXT. Verify with launch command tests
 - [x] 16.4 Delete `tests/SqlMcp.Tests/PlaceholderTests.cs`
 
+## 17. Review fixes: second code-review
+
+- [x] 17.1 Make `ApprovalStore.Read` fail closed on a damaged `databases` entry: check `value is JsonObject` before reading its `sha256`, so a non-object entry approves nothing instead of throwing `InvalidOperationException`. Verify with an approval store test
+- [x] 17.2 Make `AtomicFile` keep the target's permissions: on Unix, copy the existing file's `UnixFileMode` onto the temp file before the rename. Verify with a test that edits a `0600` config
+- [x] 17.3 Make `CloseReaderAsync` swallow any exception from disposing a cancelled reader, so an error from closing never replaces the error that ended the read. Verified by review: reproducing it needs a broken transport
+- [x] 17.4 Lower the schema's `maxBytes` maximum to 1073741824 (1 GiB), the most one buffered string value can hold. Verify with a loader test for 1073741825
+
 ## Workflow follow-up
 
 - Run `/emmz:setup` before starting, to verify dependencies and add the Makefile gates and CLAUDE.md workflow section.

@@ -104,7 +104,7 @@ Both are JSON. Comments and trailing commas are allowed. A full example:
     "deny": ["execute"],
     "limits": {
       "maxRows": 1000,        // most rows buffered per query
-      "maxBytes": 5242880,    // most bytes buffered per query (5 MB)
+      "maxBytes": 5242880,    // most bytes buffered per query (5 MB; at most 1 GiB)
       "pageSize": 100,        // rows per page
       "timeoutSeconds": 30    // command timeout
     }

@@ -152,9 +152,11 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         {
             await reader.DisposeAsync().ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        catch (Exception)
         {
-            // The server acknowledges the cancel with "operation cancelled by user".
+            // The server acknowledges the cancel with "operation cancelled by user". After an exception the transport
+            // may also be gone. Either way the read is over, and an error from closing must not replace the one that
+            // ended it.
         }
     }
 

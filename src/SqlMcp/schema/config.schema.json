@@ -42,10 +42,10 @@
           "maximum": 2147483647
         },
         "maxBytes": {
-          "description": "Most bytes buffered for one query. Default 5242880 (5 MB).",
+          "description": "Most bytes buffered for one query. Default 5242880 (5 MB), at most 1073741824 (1 GiB).",
           "type": "integer",
           "minimum": 1,
-          "maximum": 9223372036854775807
+          "maximum": 1073741824
         },
         "pageSize": {
           "description": "Rows per page. Default 100.",

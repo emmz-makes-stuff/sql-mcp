@@ -36,7 +36,8 @@ internal sealed class ApprovalStore(string path, TimeProvider time)
         {
             foreach (var (identifier, value) in approvedDatabases)
             {
-                if (value?["sha256"] is JsonValue hash && hash.TryGetValue<string>(out var text))
+                // Checked as an object first: the string indexer throws on any other node.
+                if (value is JsonObject database && database["sha256"] is JsonValue hash && hash.TryGetValue<string>(out var text))
                 {
                     databases[identifier] = text;
                 }

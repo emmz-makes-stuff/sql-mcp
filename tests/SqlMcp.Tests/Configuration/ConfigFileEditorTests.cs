@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text.Json.Nodes;
 using SqlMcp.Cli;
 using SqlMcp.Configuration;
@@ -57,6 +58,20 @@ public sealed class ConfigFileEditorTests : IDisposable
         Assert.Equal(target, new FileInfo(link).LinkTarget);
         Assert.Contains("\"allow\":[\"query\"]", File.ReadAllText(target), StringComparison.Ordinal);
         Assert.Equal(["config.json"], Directory.GetFiles(Path.Combine(_temp.Path, "dotfiles")).Select(Path.GetFileName));
+    }
+
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public void Edit_keeps_the_files_permissions()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes only");
+        var path = _temp.Write("config.json", """{ "databases": [] }""");
+        const UnixFileMode privateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        File.SetUnixFileMode(path, privateMode);
+
+        ConfigFileEditor.Apply(path, InitCommand.ConfigContent, editor => editor.Set(["defaults"], new JsonObject { ["allow"] = new JsonArray("query") }));
+
+        Assert.Equal(privateMode, File.GetUnixFileMode(path));
     }
 
     [Fact]

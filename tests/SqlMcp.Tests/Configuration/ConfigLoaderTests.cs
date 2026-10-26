@@ -140,6 +140,16 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void A_byte_cap_over_one_gibibyte_is_a_config_error_with_its_path()
+    {
+        const string text = """{ "defaults": { "limits": { "maxBytes": 1073741825 } } }""";
+
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse("/p/config.json", text, NoVariables));
+
+        Assert.StartsWith("/p/config.json: $.defaults.limits.maxBytes: ", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_fractional_limit_is_a_config_error_with_its_path()
     {
         const string text = """{ "defaults": { "limits": { "pageSize": 10.5 } } }""";
