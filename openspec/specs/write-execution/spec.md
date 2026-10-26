@@ -1,10 +1,10 @@
-# Spec Delta
+# write-execution Specification
 
 ## Purpose
 
 Lets an agent change data and schema through the `command`, `ddl` and `execute` tools, one granted category at a time. Each batch commits all or nothing, and the number of rows it may change is bounded.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Write tools
 The system SHALL provide `command`, `ddl` and `execute` tools. Each takes a database identifier and SQL text, checks its own group's permission, classifies the SQL, and runs it only if every statement is in the tool's category.
@@ -31,6 +31,13 @@ Each write tool call SHALL run in one transaction. The transaction SHALL be comm
 #### Scenario: Timeout
 - **WHEN** a write runs past the database's command timeout
 - **THEN** it is cancelled and rolled back, and the error says it timed out and that nothing was changed
+
+### Requirement: An unknown outcome is not reported as rolled back
+When sql-mcp can't know whether a write batch was committed, because a procedure in it ended sql-mcp's transaction with its own COMMIT or ROLLBACK, or because the commit itself failed, the agent SHALL be told that the outcome is unknown and to check with `query` before running it again, never that nothing was changed.
+
+#### Scenario: A procedure ends the transaction
+- **WHEN** an agent calls `execute` on a procedure that inserts a row and then runs `ROLLBACK` or an extra `COMMIT`
+- **THEN** the error says some of the batch may have been committed and to check with `query` before running it again, and the audit records that the outcome is unknown
 
 ### Requirement: Affected-rows cap
 Each database SHALL have an affected-rows cap, `maxAffectedRows` (default 1000), configured and layered like the other limits. A write batch whose statements together affect more rows than the cap SHALL be rolled back, and the agent SHALL be told the cap and to narrow the change. Every row count the server reports SHALL count towards the cap, including the rows a procedure's `SELECT` returns.
