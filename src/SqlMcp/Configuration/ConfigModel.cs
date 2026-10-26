@@ -8,9 +8,9 @@ internal enum Engine
 }
 
 /// <summary>Limits as written in one place in one file. A null value means "not set here".</summary>
-internal sealed record LimitSettings(int? MaxRows, long? MaxBytes, int? PageSize, int? TimeoutSeconds)
+internal sealed record LimitSettings(int? MaxRows, long? MaxBytes, int? PageSize, int? TimeoutSeconds, int? MaxAffectedRows)
 {
-    public static readonly LimitSettings None = new(null, null, null, null);
+    public static readonly LimitSettings None = new(null, null, null, null, null);
 }
 
 /// <summary>An allow list, a deny list and limits, as written at one level (file defaults or one database).</summary>

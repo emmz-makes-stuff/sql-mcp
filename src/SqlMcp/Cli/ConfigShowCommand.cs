@@ -47,7 +47,7 @@ internal static class ConfigShowCommand
             output.WriteLine($"  denied:     {Describe(groups.Where(g => !g.Allowed))}");
             output.WriteLine(string.Create(
                 CultureInfo.InvariantCulture,
-                $"  limits:     {limits.MaxRows} rows, {ByteSize.Format(limits.MaxBytes)}, {limits.PageSize} rows per page, {limits.TimeoutSeconds} s timeout"));
+                $"  limits:     {limits.MaxRows} rows, {ByteSize.Format(limits.MaxBytes)}, {limits.PageSize} rows per page, {limits.TimeoutSeconds} s timeout, {limits.MaxAffectedRows} affected rows per write"));
             if (database.UnapprovedWidenings.Count > 0)
             {
                 output.WriteLine($"  note:       {ApprovalMessages.NotApproved(string.Join(", ", database.UnapprovedWidenings))}");

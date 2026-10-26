@@ -112,30 +112,66 @@ public class ClassifierTests
         Assert.False(result.ForTool(StatementCategory.Command, AllTools).Accepted);
     }
 
+    [Theory]
+    [InlineData("CREATE TABLE dbo.t (a int); CREATE VIEW dbo.v AS SELECT a FROM dbo.t", "CREATE VIEW")]
+    [InlineData("CREATE VIEW dbo.v AS SELECT a FROM dbo.t; CREATE INDEX ix ON dbo.t (a)", "CREATE VIEW")]
+    [InlineData("DROP VIEW dbo.v; ALTER VIEW dbo.w AS SELECT a FROM dbo.t", "ALTER VIEW")]
+    [InlineData("CREATE OR ALTER VIEW dbo.v AS SELECT a FROM dbo.t; DROP TABLE dbo.u", "CREATE OR ALTER VIEW")]
+    [InlineData("CREATE TABLE dbo.t (a int); CREATE SCHEMA reporting", "CREATE SCHEMA")]
+    [InlineData("CREATE SCHEMA reporting; CREATE TABLE reporting.t (a int)", "CREATE SCHEMA")]
+    public void A_view_or_schema_statement_that_is_not_alone_says_so(string sql, string statement)
+    {
+        var verdict = _classifier.Classify(sql).ForTool(StatementCategory.Ddl, AllTools);
+
+        Assert.False(verdict.Accepted);
+        Assert.StartsWith($"{statement} must be the only statement in its call: send it on its own. The parser reported: syntax error at line 1", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("CREATE VIEW dbo.v AS SELEC a FROM dbo.t")]
+    [InlineData("CREATE TABLE dbo.t (a int; CREATE INDEX ix ON dbo.t (a)")]
+
+    // CREATE VIEW here is a permission, not a statement (code-review fix 10.3).
+    [InlineData("GRANT CREATE VIEW TO u; SELEC 1")]
+    [InlineData("DENY ALTER, CREATE VIEW TO u; SELEC 1")]
+    [InlineData("REVOKE CREATE SCHEMA FROM u; SELEC 1")]
+    public void Other_syntax_errors_have_no_hint(string sql)
+    {
+        var verdict = _classifier.Classify(sql).ForTool(StatementCategory.Ddl, AllTools);
+
+        Assert.StartsWith("syntax error at line 1", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Other_ddl_statements_share_a_call()
+    {
+        Assert.True(_classifier.Classify("CREATE TABLE dbo.t (a int); CREATE INDEX ix ON dbo.t (a); DROP VIEW dbo.v").ForTool(StatementCategory.Ddl, AllTools).Accepted);
+    }
+
     [Fact]
     public void Wrong_tool()
     {
-        var verdict = _classifier.Classify("DELETE FROM t").ForTool(StatementCategory.Query, AllTools);
+        var verdict = _classifier.Classify("DELETE FROM t WHERE id = 1").ForTool(StatementCategory.Query, AllTools);
 
         Assert.Equal(BatchVerdict.Reject("classified as command; use the command tool"), verdict);
     }
 
     [Fact]
-    public void Wrong_tool_that_the_server_does_not_have_yet()
+    public void Wrong_tool_that_is_denied_on_the_database()
     {
-        var verdict = _classifier.Classify("DELETE FROM t").ForTool(StatementCategory.Query, QueryOnly);
+        var verdict = _classifier.Classify("DELETE FROM t WHERE id = 1").ForTool(StatementCategory.Query, QueryOnly);
 
-        Assert.Equal(BatchVerdict.Reject("classified as command; this server has no command tool yet"), verdict);
+        Assert.Equal(BatchVerdict.Reject("classified as command; the command tool is denied on this database"), verdict);
     }
 
     [Fact]
-    public void Mixed_batch_says_which_tools_the_server_does_not_have_yet()
+    public void Mixed_batch_says_which_tools_are_denied_on_the_database()
     {
         var verdict = _classifier.Classify("SELECT 1; DROP TABLE t").ForTool(StatementCategory.Query, QueryOnly);
 
         Assert.Equal(
             BatchVerdict.Reject(
-                "statement 2 (line 1) classified as ddl; this server has no ddl tool yet. The whole batch is rejected, so nothing in it runs."),
+                "statement 2 (line 1) classified as ddl; the ddl tool is denied on this database. The whole batch is rejected, so nothing in it runs."),
             verdict);
     }
 

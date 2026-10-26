@@ -61,14 +61,16 @@ internal sealed record GroupInfo(string Group, string Source, string? Reason)
     public static GroupInfo From(GroupGrant grant) => new(grant.Group.ToConfigName(), grant.Source.ToDisplayName(), grant.Reason);
 }
 
-internal sealed record LimitsInfo(int MaxRows, long MaxBytes, int PageSize, int TimeoutSeconds)
+internal sealed record LimitsInfo(int MaxRows, long MaxBytes, int PageSize, int TimeoutSeconds, int MaxAffectedRows)
 {
-    public static LimitsInfo From(EffectiveLimits limits) => new(limits.MaxRows, limits.MaxBytes, limits.PageSize, limits.TimeoutSeconds);
+    public static LimitsInfo From(EffectiveLimits limits) =>
+        new(limits.MaxRows, limits.MaxBytes, limits.PageSize, limits.TimeoutSeconds, limits.MaxAffectedRows);
 }
 
 /// <summary>
 /// One page, as <c>query</c> and <c>next_page</c> return it. <see cref="Handle"/> is present while more pages remain;
-/// <see cref="LastPage"/> says when it is gone. The totals are only on the first page, from <c>query</c>.
+/// <see cref="LastPage"/> says when it is gone. The totals are only on the first page. A write with result sets
+/// adds <see cref="Committed"/> and <see cref="RowsAffected"/> to its first page (design W7).
 /// </summary>
 internal sealed record PageResponse(
     int ResultSet,
@@ -83,7 +85,9 @@ internal sealed record PageResponse(
     int? ResultSets = null,
     int? RowsBuffered = null,
     bool? Truncated = null,
-    string? TruncationMessage = null)
+    string? TruncationMessage = null,
+    bool? Committed = null,
+    IReadOnlyList<int>? RowsAffected = null)
 {
     public static PageResponse From(ResultPage page) => new(
         page.ResultSetIndex,
@@ -104,6 +108,9 @@ internal sealed record PageResponse(
         TruncationMessage = result.TruncationMessage,
     };
 }
+
+/// <summary>A committed write with no result sets: no pages and no handle (design W7).</summary>
+internal sealed record WriteResponse(bool Committed, IReadOnlyList<int> RowsAffected);
 
 internal sealed record ColumnInfo(string Name, string Type);
 

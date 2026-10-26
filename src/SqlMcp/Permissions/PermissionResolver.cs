@@ -94,7 +94,8 @@ internal static class PermissionResolver
                 ProjectLimit(limits.MaxRows, requestedLimits.MaxRows, "maxRows", projectApproved, widenings),
                 ProjectLimit(limits.MaxBytes, requestedLimits.MaxBytes, "maxBytes", projectApproved, widenings),
                 ProjectLimit(limits.PageSize, requestedLimits.PageSize, "pageSize", projectApproved, widenings),
-                ProjectLimit(limits.TimeoutSeconds, requestedLimits.TimeoutSeconds, "timeoutSeconds", projectApproved, widenings));
+                ProjectLimit(limits.TimeoutSeconds, requestedLimits.TimeoutSeconds, "timeoutSeconds", projectApproved, widenings),
+                ProjectLimit(limits.MaxAffectedRows, requestedLimits.MaxAffectedRows, "maxAffectedRows", projectApproved, widenings));
         }
 
         // The user file owns the connection string of a database it defines (see the 2026-10-25 devlog decision).
@@ -134,7 +135,8 @@ internal static class PermissionResolver
         settings.MaxRows ?? limits.MaxRows,
         settings.MaxBytes ?? limits.MaxBytes,
         settings.PageSize ?? limits.PageSize,
-        settings.TimeoutSeconds ?? limits.TimeoutSeconds);
+        settings.TimeoutSeconds ?? limits.TimeoutSeconds,
+        settings.MaxAffectedRows ?? limits.MaxAffectedRows);
 
     private static T ProjectLimit<T>(T before, T requested, string name, bool approved, List<string> widenings)
         where T : IComparable<T>

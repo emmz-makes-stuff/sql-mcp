@@ -39,7 +39,7 @@ Every tool call SHALL check the tool's group against the database's effective pe
 - **THEN** no connection is opened, and the error says which group is denied and why
 
 ### Requirement: list_databases tool
-The system SHALL provide a `list_databases` tool. For each configured database it returns the identifier, whether it is available, the reason if not, the effective allowed and denied groups each with its source, and the result cap, page size and timeout.
+The system SHALL provide a `list_databases` tool. For each configured database it returns the identifier, whether it is available, the reason if not, the effective allowed and denied groups each with its source, and the result cap, page size, timeout and affected-rows cap.
 
 #### Scenario: Listing shows provenance
 - **WHEN** a project file's widening has not been approved
@@ -48,6 +48,10 @@ The system SHALL provide a `list_databases` tool. For each configured database i
 #### Scenario: Unavailable database
 - **WHEN** a database's connection string references an unset environment variable
 - **THEN** it is listed as unavailable, with that reason, and without any part of the connection string
+
+#### Scenario: Affected-rows cap is listed
+- **WHEN** `localhost:1433/app` sets `maxAffectedRows` to 50
+- **THEN** its listing gives an affected-rows cap of 50
 
 ### Requirement: Only permitted tools are offered
 The system SHALL expose MCP tools only for groups that are allowed on at least one configured database. Permission is still checked again on every call.

@@ -50,7 +50,7 @@ public sealed class ConfigShowCommandTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("localhost:1433/app  (user config)", result.Output, StringComparison.Ordinal);
         Assert.Contains("available:  yes", result.Output, StringComparison.Ordinal);
-        Assert.Contains("1000 rows, 5 MB, 100 rows per page, 30 s timeout", result.Output, StringComparison.Ordinal);
+        Assert.Contains("1000 rows, 5 MB, 100 rows per page, 30 s timeout, 1000 affected rows per write", result.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-value", result.Output, StringComparison.Ordinal);
         Assert.Contains("(not found)", result.Output, StringComparison.Ordinal);
     }

@@ -7,7 +7,8 @@ databases, instead of the `mssql`/`pgsql` CLIs, which run anything the login all
   unparseable or unrecognised is rejected.
 - Each database has its own allow and deny lists for those groups. By default only Query and introspection are
   allowed.
-- Queries run in a transaction that is always rolled back, and results are capped and paged.
+- Queries run in a transaction that is always rolled back. Writes commit all or nothing, and a batch that affects
+  more rows than the database's cap is rolled back. Results are capped and paged.
 - Every executed or denied statement is written to a per-session audit log, which never holds result data.
 
 It ships as the `dotnet` tool `Emmz.SqlMcp` (command `sql-mcp`). SQL Server is supported first. PostgreSQL is planned.
@@ -73,9 +74,8 @@ Every command exits 0 on success and 1 on failure, with errors on stderr. Only `
 | `sql-mcp approve` | Shows what the project config widens, and approves it once you type the project directory's name. Must be run by a person in an interactive terminal. It has no `--yes` option, by design. |
 | `sql-mcp register <client> [--scope user\|project] [--launcher tool\|dnx] [--force]` | Adds sql-mcp as an MCP server to `claude`, `codex`, `gemini` or `opencode`. Scope defaults to `user`. If the client can't be updated, it prints the config to add by hand. |
 
-The tool groups are `query`, `introspection`, `command` (INSERT, UPDATE, DELETE, MERGE), `ddl` and `execute`.
-This release has the `query` tool, plus `list_databases`, `next_page` and `abandon`. The other groups' tools come
-in later releases.
+The tool groups are `query`, `introspection`, `command` (INSERT, UPDATE, DELETE, MERGE), `ddl` and `execute`. By
+default only `query` and `introspection` are allowed. Introspection tools come in a later release.
 
 Edits go to the project's `.sql-mcp/config.json`, or with `--user` to the user config. They keep comments and
 formatting, and are checked against the schema before anything is written.
@@ -84,6 +84,59 @@ formatting, and are checked against the schema before anything is written.
 command. Teammates whose checkout is somewhere else need to run it themselves. Codex reads a project's
 `.codex/config.toml` only once the project is trusted. Gemini won't write project settings in an untrusted
 workspace, and sql-mcp doesn't bypass that check.
+
+## Tools
+
+The agent sees `list_databases` always, and each other tool only when its group is allowed on at least one
+database. Every call checks the permission again for the database it names.
+
+| Tool | What it runs |
+|---|---|
+| `list_databases` | Lists the databases, whether each is available, its allowed and denied groups with where each comes from, and its limits. |
+| `query` | Read-only queries. The batch runs in a transaction that is always rolled back. |
+| `command` | INSERT, UPDATE, DELETE and MERGE, including `OUTPUT` and `OUTPUT INTO` a table. |
+| `ddl` | Tables, columns, constraints, indexes, views, schemas and sequences, and `TRUNCATE TABLE`. |
+| `execute` | `EXEC` of an existing user procedure, with literal or `NULL` parameter values. |
+| `next_page`, `abandon` | Read on through, or release, a paged result from `query`, `command` or `execute`. |
+
+Every statement in a batch must belong to the tool's group. Otherwise nothing is sent, and the refusal names the
+tool that would run it, or says that tool is denied on this database.
+
+**Writes** (`command`, `ddl` and `execute`) commit **all or nothing**:
+
+- The batch runs in one transaction, with `XACT_ABORT` on. If any statement fails or the batch times out, it is all
+  rolled back, and the agent is told nothing was committed. The exceptions are a procedure that commits or rolls
+  back that transaction itself, and a commit that fails in flight. Then sql-mcp can't know what was kept, so the
+  agent is told to check with `query` before running it again.
+- **Affected-rows cap:** if the batch's statements together report more rows than `maxAffectedRows` (default
+  1000), it is rolled back. The cap counts every row count the server reports, including rows a procedure's
+  `SELECT` returns. A procedure that sets `NOCOUNT ON` reports none, so the cap can't see its changes. Nor do
+  `TRUNCATE TABLE` and `DROP`, so the cap doesn't limit them.
+- The result gives `committed: true` and the rows each statement affected. Any result sets (from `OUTPUT`, or a
+  procedure's `SELECT`) are capped and paged like a query's. A result over the row or byte cap is truncated, but
+  the batch still runs to completion and commits.
+
+What each write group accepts:
+
+- **WHERE rule:** UPDATE and DELETE need a `WHERE` clause. It catches a forgotten filter, not a deliberate one:
+  `WHERE 1 = 1` passes, and the cap is the backstop.
+- **Names rule:** a write may only name objects in the target database: a name with a database or server part is
+  refused.
+- **ddl** refuses procedures, functions and triggers, whose bodies would run later unseen, and every security
+  change (users, roles, permissions, `CREATE SCHEMA … AUTHORIZATION`, `ALTER SCHEMA … TRANSFER`). A view's
+  `SELECT` must be a valid query. SQL Server runs a view or schema statement only on its own, so each goes in a
+  call of its own.
+- **execute** refuses system procedures (the `sys` schema, and names starting `sp_` or `xp_`), dynamic SQL, and
+  `EXEC` of a string. An `execute` grant trusts the database's procedures: sql-mcp checks the `EXEC`, never the
+  procedure's body.
+
+`docs/classifier.md` has the details.
+
+> **Keep `timeoutSeconds` short on databases that allow `command`.** SQL Server reports a statement's row count
+> only when it completes, so a change over the cap runs in full before it is undone. While it runs, and while it
+> rolls back, it holds locks and grows the transaction log. The rollback isn't bounded by the timeout and can take
+> as long again. On a shared database, that is an outage even though nothing is lost. The tool descriptions tell
+> the agent to count matching rows with `query` first.
 
 ## Configuration
 
@@ -106,7 +159,8 @@ Both are JSON. Comments and trailing commas are allowed. A full example:
       "maxRows": 1000,        // most rows buffered per query
       "maxBytes": 5242880,    // most bytes buffered per query (5 MB; at most 1 GiB)
       "pageSize": 100,        // rows per page
-      "timeoutSeconds": 30    // command timeout
+      "timeoutSeconds": 30,   // command timeout
+      "maxAffectedRows": 1000 // most rows one write batch may affect; past it, the whole batch is rolled back
     }
   },
 
@@ -136,8 +190,11 @@ How the effective permissions are worked out:
 - **Secrets:** `${env:NAME}` is substituted in connection strings when the server connects. A database whose
   variable isn't set is listed as unavailable.
 
-Every executed or denied statement goes to a per-session JSON Lines audit log, in `.sql-mcp/logs/` (or
-`~/.local/state/sql-mcp/logs/` when the project has no `.sql-mcp/`). The log never holds result data.
+Every executed, denied or failed statement goes to a per-session JSON Lines audit log, in `.sql-mcp/logs/` (or
+`~/.local/state/sql-mcp/logs/` when the project has no `.sql-mcp/`). The log never holds result data. A write
+is logged as `executed` only once it is committed, with the rows each statement affected; a rolled-back write is
+logged as `failed`, with why (an error, a timeout, or the cap). A write whose outcome sql-mcp can't know is also
+logged as `failed`, with the kind `outcome_unknown`.
 
 ## Threat model
 

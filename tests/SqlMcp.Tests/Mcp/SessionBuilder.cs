@@ -13,6 +13,9 @@ internal sealed class FakeExecutor : IQueryExecutor
 {
     public List<string> Calls { get; } = [];
 
+    /// <summary>The mode of each call, in the same order as <see cref="Calls"/>.</summary>
+    public List<BatchMode> Modes { get; } = [];
+
     public QueryOutcome Outcome { get; set; } = new QuerySucceeded(new BufferedResult([], false, null), TimeSpan.FromMilliseconds(5));
 
     /// <summary>When set, the call is cancelled as if the client gave up while the batch ran.</summary>
@@ -21,9 +24,14 @@ internal sealed class FakeExecutor : IQueryExecutor
     /// <summary>When set, the call throws this, as an executor bug or an unreadable value would.</summary>
     public Exception? Throws { get; set; }
 
-    public Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, EffectiveLimits limits, CancellationToken cancellationToken)
+    /// <summary>Runs while the batch "executes", e.g. to take the audit log away before the outcome is logged.</summary>
+    public Action? During { get; set; }
+
+    public Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, BatchMode mode, EffectiveLimits limits, CancellationToken cancellationToken)
     {
         Calls.Add(sql);
+        Modes.Add(mode);
+        During?.Invoke();
         if (Throws is not null)
         {
             return Task.FromException<QueryOutcome>(Throws);

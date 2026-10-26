@@ -20,73 +20,31 @@ internal static class Allowlists
         [typeof(CreateTableStatement)] = StatementCategory.Ddl,
         [typeof(DropTableStatement)] = StatementCategory.Ddl,
         [typeof(AlterTableAddTableElementStatement)] = StatementCategory.Ddl,
+        [typeof(AlterTableAlterColumnStatement)] = StatementCategory.Ddl,
+        [typeof(AlterTableDropTableElementStatement)] = StatementCategory.Ddl,
+        [typeof(AlterTableConstraintModificationStatement)] = StatementCategory.Ddl,
         [typeof(TruncateTableStatement)] = StatementCategory.Ddl,
+        [typeof(CreateIndexStatement)] = StatementCategory.Ddl,
+        [typeof(AlterIndexStatement)] = StatementCategory.Ddl,
+        [typeof(DropIndexStatement)] = StatementCategory.Ddl,
+        [typeof(CreateViewStatement)] = StatementCategory.Ddl,
+        [typeof(AlterViewStatement)] = StatementCategory.Ddl,
+        [typeof(CreateOrAlterViewStatement)] = StatementCategory.Ddl,
+        [typeof(DropViewStatement)] = StatementCategory.Ddl,
+        [typeof(CreateSchemaStatement)] = StatementCategory.Ddl,
+        [typeof(DropSchemaStatement)] = StatementCategory.Ddl,
+        [typeof(CreateSequenceStatement)] = StatementCategory.Ddl,
+        [typeof(AlterSequenceStatement)] = StatementCategory.Ddl,
+        [typeof(DropSequenceStatement)] = StatementCategory.Ddl,
         [typeof(ExecuteStatement)] = StatementCategory.Execute,
     };
 
-    private static readonly HashSet<Type> Query =
+    /// <summary>
+    /// Names, literals, scalar expressions and predicates: what a query's expressions use, and what a DDL default,
+    /// CHECK constraint or computed column may use (design W5). Subqueries are not here.
+    /// </summary>
+    private static readonly HashSet<Type> Scalars =
     [
-        typeof(SelectStatement),
-
-        // Query structure
-        typeof(QuerySpecification),
-        typeof(BinaryQueryExpression),
-        typeof(QueryParenthesisExpression),
-        typeof(WithCtesAndXmlNamespaces),
-        typeof(CommonTableExpression),
-        typeof(SelectScalarExpression),
-        typeof(SelectStarExpression),
-        typeof(FromClause),
-        typeof(WhereClause),
-        typeof(GroupByClause),
-        typeof(HavingClause),
-        typeof(OrderByClause),
-        typeof(ExpressionWithSortOrder),
-        typeof(TopRowFilter),
-        typeof(OffsetClause),
-
-        // Table sources
-        typeof(NamedTableReference),
-        typeof(QualifiedJoin),
-        typeof(UnqualifiedJoin),
-        typeof(QueryDerivedTable),
-        typeof(SchemaObjectFunctionTableReference),
-        typeof(PivotedTableReference),
-        typeof(UnpivotedTableReference),
-        typeof(OpenJsonTableReference),
-        typeof(SchemaDeclarationItemOpenjson),
-        typeof(ColumnDefinitionBase),
-        typeof(TemporalClause),
-
-        // Table hints: the hint kind is checked in SideEffectChecks.
-        typeof(TableHint),
-        typeof(IndexTableHint),
-        typeof(ForceSeekTableHint),
-
-        // Grouping
-        typeof(ExpressionGroupingSpecification),
-        typeof(CompositeGroupingSpecification),
-        typeof(RollupGroupingSpecification),
-        typeof(GroupingSetsGroupingSpecification),
-        typeof(GrandTotalGroupingSpecification),
-
-        // Windows
-        typeof(OverClause),
-        typeof(WindowFrameClause),
-        typeof(WindowDelimiter),
-        typeof(WithinGroupClause),
-
-        // FOR JSON / FOR XML
-        typeof(JsonForClause),
-        typeof(JsonForClauseOption),
-        typeof(XmlForClause),
-        typeof(XmlForClauseOption),
-
-        // OPTION (...)
-        typeof(OptimizerHint),
-        typeof(LiteralOptimizerHint),
-        typeof(OptimizeForOptimizerHint),
-
         // Names
         typeof(Identifier),
         typeof(MultiPartIdentifier),
@@ -124,7 +82,6 @@ internal static class Allowlists
         typeof(SearchedWhenClause),
         typeof(SimpleCaseExpression),
         typeof(SimpleWhenClause),
-        typeof(ScalarSubquery),
 
         // Predicates
         typeof(BooleanComparisonExpression),
@@ -134,16 +91,92 @@ internal static class Allowlists
         typeof(BooleanTernaryExpression),
         typeof(InPredicate),
         typeof(LikePredicate),
+    ];
+
+    private static readonly HashSet<Type> Query =
+    [
+        typeof(SelectStatement),
+
+        // Query structure
+        typeof(QuerySpecification),
+        typeof(BinaryQueryExpression),
+        typeof(QueryParenthesisExpression),
+        typeof(WithCtesAndXmlNamespaces),
+        typeof(CommonTableExpression),
+        typeof(SelectScalarExpression),
+        typeof(SelectStarExpression),
+        typeof(FromClause),
+        typeof(WhereClause),
+        typeof(GroupByClause),
+        typeof(HavingClause),
+        typeof(OrderByClause),
+        typeof(ExpressionWithSortOrder),
+        typeof(TopRowFilter),
+        typeof(OffsetClause),
+
+        // Table sources
+        typeof(NamedTableReference),
+        typeof(QualifiedJoin),
+        typeof(UnqualifiedJoin),
+        typeof(QueryDerivedTable),
+        typeof(InlineDerivedTable),
+        typeof(RowValue),
+        typeof(SchemaObjectFunctionTableReference),
+        typeof(PivotedTableReference),
+        typeof(UnpivotedTableReference),
+        typeof(OpenJsonTableReference),
+        typeof(SchemaDeclarationItemOpenjson),
+        typeof(ColumnDefinitionBase),
+        typeof(TemporalClause),
+
+        // Table hints: the hint kind is checked in SideEffectChecks.
+        typeof(TableHint),
+        typeof(IndexTableHint),
+        typeof(ForceSeekTableHint),
+
+        // Grouping
+        typeof(ExpressionGroupingSpecification),
+        typeof(CompositeGroupingSpecification),
+        typeof(RollupGroupingSpecification),
+        typeof(GroupingSetsGroupingSpecification),
+        typeof(GrandTotalGroupingSpecification),
+
+        // Windows
+        typeof(OverClause),
+        typeof(WindowFrameClause),
+        typeof(WindowDelimiter),
+        typeof(WithinGroupClause),
+
+        // FOR JSON / FOR XML
+        typeof(JsonForClause),
+        typeof(JsonForClauseOption),
+        typeof(XmlForClause),
+        typeof(XmlForClauseOption),
+
+        // OPTION (...)
+        typeof(OptimizerHint),
+        typeof(LiteralOptimizerHint),
+        typeof(OptimizeForOptimizerHint),
+
+        .. Scalars,
+
+        // Subqueries: a query may nest them, but a default, CHECK constraint or computed column may not.
+        typeof(ScalarSubquery),
         typeof(ExistsPredicate),
         typeof(SubqueryComparisonPredicate),
     ];
 
+    /// <summary>
+    /// A command reads with everything a query may use, plus the DML nodes (design W5). Locking hints and
+    /// <c>NEXT VALUE FOR</c> are fine here: the write takes those locks and advances sequences anyway.
+    /// </summary>
     private static readonly HashSet<Type> Command =
     [
+        .. Query,
+
         typeof(InsertStatement),
         typeof(InsertSpecification),
         typeof(ValuesInsertSource),
-        typeof(RowValue),
         typeof(SelectInsertSource),
         typeof(UpdateStatement),
         typeof(UpdateSpecification),
@@ -155,39 +188,68 @@ internal static class Allowlists
         typeof(MergeActionClause),
         typeof(UpdateMergeAction),
         typeof(InsertMergeAction),
-
-        // The SELECT of INSERT ... SELECT, and filters.
-        typeof(QuerySpecification),
-        typeof(SelectScalarExpression),
-        typeof(FromClause),
-        typeof(WhereClause),
-        typeof(NamedTableReference),
-
-        typeof(Identifier),
-        typeof(MultiPartIdentifier),
-        typeof(SchemaObjectName),
-        typeof(ColumnReferenceExpression),
-        typeof(IntegerLiteral),
-        typeof(StringLiteral),
-        typeof(BinaryExpression),
-        typeof(BooleanComparisonExpression),
+        typeof(DeleteMergeAction),
+        typeof(OutputClause),
+        typeof(OutputIntoClause),
+        typeof(NextValueForExpression),
     ];
 
+    /// <summary>
+    /// Declarative objects only (design W5): tables, columns, constraints, indexes, views, schemas and sequences.
+    /// Defaults, CHECK constraints and computed columns use the scalar expressions. A view's SELECT is walked under
+    /// the query category, so the query list is not needed here.
+    /// </summary>
     private static readonly HashSet<Type> Ddl =
     [
+        .. Scalars,
+
+        // Tables, columns and constraints
         typeof(CreateTableStatement),
         typeof(TableDefinition),
         typeof(ColumnDefinition),
         typeof(NullableConstraintDefinition),
         typeof(UniqueConstraintDefinition),
+        typeof(DefaultConstraintDefinition),
+        typeof(CheckConstraintDefinition),
+        typeof(ForeignKeyConstraintDefinition),
+        typeof(IdentityOptions),
+        typeof(ColumnWithSortOrder),
         typeof(DropTableStatement),
         typeof(AlterTableAddTableElementStatement),
+        typeof(AlterTableAlterColumnStatement),
+        typeof(AlterTableDropTableElementStatement),
+        typeof(AlterTableDropTableElement),
+        typeof(AlterTableConstraintModificationStatement),
         typeof(TruncateTableStatement),
 
-        typeof(Identifier),
-        typeof(SchemaObjectName),
-        typeof(SqlDataTypeReference),
-        typeof(IntegerLiteral),
+        // Indexes
+        typeof(CreateIndexStatement),
+        typeof(AlterIndexStatement),
+        typeof(DropIndexStatement),
+        typeof(DropIndexClause),
+        typeof(IndexDefinition),
+
+        // Views: the SELECT itself is checked as a query.
+        typeof(CreateViewStatement),
+        typeof(AlterViewStatement),
+        typeof(CreateOrAlterViewStatement),
+        typeof(DropViewStatement),
+        typeof(ViewOption),
+
+        // Schemas: CREATE SCHEMA only without elements or AUTHORIZATION (SideEffectChecks).
+        typeof(CreateSchemaStatement),
+        typeof(DropSchemaStatement),
+        typeof(StatementList),
+
+        // Sequences
+        typeof(CreateSequenceStatement),
+        typeof(AlterSequenceStatement),
+        typeof(DropSequenceStatement),
+        typeof(DataTypeSequenceOption),
+        typeof(ScalarExpressionSequenceOption),
+
+        // A sequence-backed default (DEFAULT NEXT VALUE FOR s) advances the sequence only when a row is inserted.
+        typeof(NextValueForExpression),
     ];
 
     private static readonly HashSet<Type> Execute =
@@ -199,13 +261,22 @@ internal static class Allowlists
         typeof(ProcedureReference),
         typeof(ExecuteParameter),
 
-        // A parameter name (@a = 1). EXEC of a procedure *named* by a variable is rejected in SideEffectChecks.
+        // A parameter name (@a = 1). EXEC of a procedure *named* by a variable, and a variable as a parameter's
+        // value, are rejected in SideEffectChecks.
         typeof(VariableReference),
 
         typeof(Identifier),
         typeof(SchemaObjectName),
+
+        // Parameter values: literals, NULL, and negated numbers (SideEffectChecks keeps UnaryExpression to those).
         typeof(IntegerLiteral),
+        typeof(NumericLiteral),
+        typeof(RealLiteral),
+        typeof(MoneyLiteral),
         typeof(StringLiteral),
+        typeof(BinaryLiteral),
+        typeof(NullLiteral),
+        typeof(UnaryExpression),
     ];
 
     public static IReadOnlySet<Type> For(StatementCategory category) => category switch

@@ -33,6 +33,54 @@ public class AllowlistGuardTests
         Assert.DoesNotContain(Allowlists.For(StatementCategory.Query), type => type.Name == typeName);
     }
 
+    /// <summary>Rowset functions reach outside the database, so no category may accept them (design W5).</summary>
+    public static TheoryData<string> NeverAnywhere => new(
+        nameof(OpenQueryTableReference),
+        nameof(OpenRowsetTableReference),
+        nameof(BulkOpenRowset),
+        nameof(InternalOpenRowset),
+        nameof(OpenRowsetCosmos),
+        nameof(AdHocTableReference));
+
+    [Theory]
+    [MemberData(nameof(NeverAnywhere))]
+    public void No_allowlist_includes(string typeName)
+    {
+        var categories = new[] { StatementCategory.Query, StatementCategory.Command, StatementCategory.Ddl, StatementCategory.Execute };
+
+        Assert.All(categories, category => Assert.DoesNotContain(Allowlists.For(category), type => type.Name == typeName));
+    }
+
+    /// <summary>
+    /// Statements no tool may run: programmable objects, whose bodies run later unseen (design W5), and database- and
+    /// security-level DDL.
+    /// </summary>
+    public static TheoryData<string> NeverRun => new(
+        nameof(CreateProcedureStatement),
+        nameof(AlterProcedureStatement),
+        nameof(CreateOrAlterProcedureStatement),
+        nameof(CreateFunctionStatement),
+        nameof(AlterFunctionStatement),
+        nameof(CreateOrAlterFunctionStatement),
+        nameof(CreateTriggerStatement),
+        nameof(AlterTriggerStatement),
+        nameof(CreateOrAlterTriggerStatement),
+        nameof(AlterSchemaStatement),
+        nameof(AlterAuthorizationStatement),
+        nameof(CreateUserStatement),
+        nameof(CreateLoginStatement),
+        nameof(CreateRoleStatement),
+        nameof(AlterRoleStatement),
+        nameof(CreateDatabaseStatement),
+        nameof(AlterDatabaseSetStatement));
+
+    [Theory]
+    [MemberData(nameof(NeverRun))]
+    public void No_tool_runs(string typeName)
+    {
+        Assert.DoesNotContain(Allowlists.StatementCategories.Keys, type => type.Name == typeName);
+    }
+
     [Fact]
     public void Every_allowlisted_type_is_a_scriptdom_node()
     {

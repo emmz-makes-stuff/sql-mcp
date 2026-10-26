@@ -10,7 +10,7 @@ public sealed class ApproveCommandTests : IDisposable
     private const string DdlOnApp = """
         {
           "databases": [
-            { "connectionString": "Server=localhost,1433;Database=app", "allow": ["ddl"], "limits": { "maxRows": 5000, "pageSize": 10 } }
+            { "connectionString": "Server=localhost,1433;Database=app", "allow": ["ddl"], "limits": { "maxRows": 5000, "pageSize": 10, "maxAffectedRows": 5000 } }
           ]
         }
         """;
@@ -30,7 +30,7 @@ public sealed class ApproveCommandTests : IDisposable
         var result = await _cli.RunAsync("approve");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("localhost:1433/app: adds this database, allows ddl, maxRows 1000 → 5000", result.Output, StringComparison.Ordinal);
+        Assert.Contains("localhost:1433/app: adds this database, allows ddl, maxRows 1000 → 5000, maxAffectedRows 1000 → 5000", result.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("pageSize", result.Output, StringComparison.Ordinal);
         Assert.Contains($"type the project directory's name ({DirectoryName})", result.Output, StringComparison.Ordinal);
         Assert.Contains("Approved.", result.Output, StringComparison.Ordinal);

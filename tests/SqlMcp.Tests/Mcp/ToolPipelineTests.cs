@@ -42,6 +42,32 @@ public sealed class ToolPipelineTests : IDisposable
         Assert.Equal(5 * 1024 * 1024, db["limits"]!["max_bytes"]!.GetValue<long>());
         Assert.Equal(100, db["limits"]!["page_size"]!.GetValue<int>());
         Assert.Equal(30, db["limits"]!["timeout_seconds"]!.GetValue<int>());
+        Assert.Equal(1000, db["limits"]!["max_affected_rows"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Affected_rows_cap_is_listed()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=localhost;Database=App", "limits": { "maxAffectedRows": 50 } } ] }""");
+        using var session = _builder.Build();
+
+        var db = Assert.Single(Json(new ToolPipeline(session).ListDatabases())["databases"]!.AsArray())!;
+
+        Assert.Equal(50, db["limits"]!["max_affected_rows"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void An_ignored_affected_rows_cap_raise_is_waiting_for_approval()
+    {
+        _builder
+            .User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""")
+            .Project("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "maxAffectedRows": 5000 } } ] }""");
+        using var session = _builder.Build();
+
+        var db = Assert.Single(Json(new ToolPipeline(session).ListDatabases())["databases"]!.AsArray())!;
+
+        Assert.Equal(1000, db["limits"]!["max_affected_rows"]!.GetValue<int>());
+        Assert.Equal(ApprovalMessages.NotApproved(ApprovalMessages.Raises("maxAffectedRows")), db["not_approved"]!.GetValue<string>());
     }
 
     [Fact]
@@ -193,19 +219,37 @@ public sealed class ToolPipelineTests : IDisposable
     }
 
     [Fact]
-    public async Task Rejected_statement()
+    public async Task Wrong_tool()
     {
-        _builder.User(OneDatabase);
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users", Cancel);
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users WHERE id = 1", Cancel);
 
         Assert.True(result.IsError);
-        Assert.Equal("Rejected, nothing was sent to the database: classified as command; this server has no command tool yet", result.Text);
+        Assert.Equal("Rejected, nothing was sent to the database: classified as command; use the command tool", result.Text);
+        Assert.Empty(_builder.Executor.Calls);
+    }
+
+    [Fact]
+    public async Task Right_tool_is_denied_here()
+    {
+        // command is allowed on another database, but the reason is about the target one.
+        _builder.User("""
+            { "databases": [
+                { "connectionString": "Server=sqlhost;Database=Sales" },
+                { "connectionString": "Server=sqlhost;Database=Scratch", "allow": ["command"] } ] }
+            """);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users WHERE id = 1", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("Rejected, nothing was sent to the database: classified as command; the command tool is denied on this database", result.Text);
         Assert.Empty(_builder.Executor.Calls);
 
         var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
-        Assert.Equal("DELETE FROM dbo.users", denied["sql"]!.GetValue<string>());
+        Assert.Equal("DELETE FROM dbo.users WHERE id = 1", denied["sql"]!.GetValue<string>());
         Assert.Equal(result.Text, denied["reason"]!.GetValue<string>());
         Assert.Null(denied["source"]);
     }
@@ -221,6 +265,7 @@ public sealed class ToolPipelineTests : IDisposable
         var first = Json(await pipeline.QueryAsync(Sales, "SELECT id, name FROM dbo.users", Cancel));
 
         Assert.Equal(["SELECT id, name FROM dbo.users"], _builder.Executor.Calls);
+        Assert.Equal([BatchMode.ReadOnly], _builder.Executor.Modes);
         Assert.Equal(250, first["rows_buffered"]!.GetValue<int>());
         Assert.False(first["truncated"]!.GetValue<bool>());
         Assert.Equal(1, first["result_sets"]!.GetValue<int>());
@@ -374,6 +419,212 @@ public sealed class ToolPipelineTests : IDisposable
         Assert.Empty(_builder.Executor.Calls);
         Assert.Equal([_builder.Paths.UserConfig], session.ConfigFiles);
     }
+
+    public static TheoryData<string, string> WritesOfAnotherCategory => new()
+    {
+        { ToolNames.Command, "DROP TABLE dbo.users" },
+        { ToolNames.Ddl, "DELETE FROM dbo.users WHERE id = 1" },
+        { ToolNames.Execute, "SELECT id FROM dbo.users" },
+    };
+
+    [Theory]
+    [MemberData(nameof(WritesOfAnotherCategory))]
+    public async Task Statement_of_another_category(string tool, string sql)
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        var result = await Write(new ToolPipeline(session), tool, sql);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith("Rejected, nothing was sent to the database: classified as ", result.Text, StringComparison.Ordinal);
+        Assert.Empty(_builder.Executor.Calls);
+        var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
+        Assert.Equal(tool, denied["tool"]!.GetValue<string>());
+        Assert.Equal(sql, denied["sql"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Command_rejects_ddl_naming_the_tool_that_would_run_it()
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).CommandAsync(Sales, "DROP TABLE dbo.users", Cancel);
+
+        Assert.Equal("Rejected, nothing was sent to the database: classified as ddl; use the ddl tool", result.Text);
+    }
+
+    [Theory]
+    [InlineData(ToolNames.Command)]
+    [InlineData(ToolNames.Ddl)]
+    [InlineData(ToolNames.Execute)]
+    public async Task Group_denied(string tool)
+    {
+        // Every write group is denied by default.
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await Write(new ToolPipeline(session), tool, "UPDATE dbo.users SET name = 'x' WHERE id = 1");
+
+        Assert.True(result.IsError);
+        Assert.Equal($"{tool} is denied on {Sales} (source: default).", result.Text);
+        Assert.Empty(_builder.Executor.Calls);
+        var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
+        Assert.Equal(tool, denied["tool"]!.GetValue<string>());
+        Assert.Equal("default", denied["source"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(ToolNames.Command, "UPDATE dbo.users SET name = 'x' WHERE id = 1")]
+    [InlineData(ToolNames.Ddl, "CREATE INDEX ix_name ON dbo.users (name)")]
+    [InlineData(ToolNames.Execute, "EXEC dbo.archive_orders @before = '2026-01-01'")]
+    public async Task Write_tools_run_in_write_mode(string tool, string sql)
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        await Write(new ToolPipeline(session), tool, sql);
+
+        Assert.Equal([sql], _builder.Executor.Calls);
+        Assert.Equal([BatchMode.Write], _builder.Executor.Modes);
+    }
+
+    [Fact]
+    public async Task Committed_write()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Outcome = new QuerySucceeded(new BufferedResult([], false, null), TimeSpan.FromMilliseconds(9)) { RowsAffected = [3, 5] };
+        using var session = _builder.Build();
+        const string sql = "UPDATE dbo.users SET name = 'x' WHERE id < 4; DELETE FROM dbo.users WHERE id > 10";
+
+        var result = await new ToolPipeline(session).CommandAsync(Sales, sql, Cancel);
+
+        // No result sets, so no pages and no handle.
+        Assert.Equal("""{"committed":true,"rows_affected":[3,5]}""", result.Text);
+        Assert.False(result.IsError);
+
+        var executed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "executed");
+        Assert.Equal("command", executed["tool"]!.GetValue<string>());
+        Assert.Equal(Sales, executed["database"]!.GetValue<string>());
+        Assert.Equal(sql, executed["sql"]!.GetValue<string>());
+        Assert.Equal("""["command","command"]""", executed["classification"]!.ToJsonString());
+        Assert.Equal("[3,5]", executed["rows_affected"]!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task A_write_with_result_sets_is_paged_like_a_query()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Outcome = new QuerySucceeded(Rows(250), TimeSpan.Zero) { RowsAffected = [250] };
+        using var session = _builder.Build();
+        var pipeline = new ToolPipeline(session);
+
+        var first = Json(await pipeline.CommandAsync(Sales, "DELETE FROM dbo.users OUTPUT deleted.id, deleted.name WHERE id > 0", Cancel));
+
+        Assert.True(first["committed"]!.GetValue<bool>());
+        Assert.Equal("[250]", first["rows_affected"]!.ToJsonString());
+        Assert.Equal(3, first["pages"]!.GetValue<int>());
+        Assert.Equal(100, first["rows"]!.AsArray().Count);
+        var handle = first["handle"]!.GetValue<string>();
+
+        var second = Json(pipeline.NextPage(handle));
+        Assert.Equal(2, second["page"]!.GetValue<int>());
+        Assert.False(second.ContainsKey("committed"));
+    }
+
+    [Fact]
+    public async Task A_read_logs_no_rows_affected()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        await new ToolPipeline(session).QueryAsync(Sales, "SELECT id FROM dbo.users", Cancel);
+
+        var executed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "executed");
+        Assert.False(executed.ContainsKey("rows_affected"));
+    }
+
+    [Fact]
+    public async Task Write_rolled_back_by_the_cap()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Outcome = new QueryFailed(FailureKind.AffectedRowsCap, "over the affected-rows cap: the statements that completed affected 5000 rows … nothing was committed.", null, null, null, TimeSpan.Zero)
+        {
+            Cap = 1000,
+            Affected = 5000,
+        };
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).CommandAsync(Sales, "UPDATE dbo.users SET name = 'x' WHERE id > 0", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("over the affected-rows cap: the statements that completed affected 5000 rows … nothing was committed.", result.Text);
+        var events = SessionBuilder.Events(session);
+        Assert.DoesNotContain(events, e => e["event"]!.GetValue<string>() == "executed");
+        var failed = events.Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal("command", failed["tool"]!.GetValue<string>());
+        Assert.Equal("affected_rows_cap", failed["kind"]!.GetValue<string>());
+        Assert.Equal(1000, failed["cap"]!.GetValue<int>());
+        Assert.Equal(5000, failed["affected"]!.GetValue<long>());
+    }
+
+    [Fact]
+    public async Task A_write_whose_outcome_is_unknown_is_not_reported_as_rolled_back()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Outcome = new QueryFailed(
+            FailureKind.OutcomeUnknown, "a procedure ended sql-mcp's transaction … Check with query before running it again.", 266, 16, 2, TimeSpan.Zero);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).ExecuteAsync(Sales, "EXEC dbo.p", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("a procedure ended sql-mcp's transaction … Check with query before running it again.", result.Text);
+        var failed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal("execute", failed["tool"]!.GetValue<string>());
+        Assert.Equal("outcome_unknown", failed["kind"]!.GetValue<string>());
+        Assert.Equal(266, failed["error_number"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task An_escaping_exception_in_a_write_says_nothing_was_committed()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Throws = new InvalidOperationException("no converter");
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).CommandAsync(Sales, "UPDATE dbo.users SET name = 'x' WHERE id = 1", Cancel);
+
+        Assert.Equal("command failed: no converter The batch was rolled back, so nothing was committed.", result.Text);
+        var failed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal("other", failed["kind"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_committed_write_the_log_could_not_record_is_reported_as_committed()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Outcome = new QuerySucceeded(new BufferedResult([], false, null), TimeSpan.Zero) { RowsAffected = [1] };
+        using var session = _builder.Build();
+        _builder.Executor.During = session.Audit.Dispose;
+
+        var result = await new ToolPipeline(session).CommandAsync(Sales, "UPDATE dbo.users SET name = 'x' WHERE id = 1", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith("audit log unavailable: the batch was committed", result.Text, StringComparison.Ordinal);
+        Assert.Contains("Don't run it again", result.Text, StringComparison.Ordinal);
+    }
+
+    private const string AllWrites = """{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command", "ddl", "execute"] } ] }""";
+
+    private static Task<ToolResult> Write(ToolPipeline pipeline, string tool, string sql) => tool switch
+    {
+        ToolNames.Command => pipeline.CommandAsync(Sales, sql, Cancel),
+        ToolNames.Ddl => pipeline.DdlAsync(Sales, sql, Cancel),
+        ToolNames.Execute => pipeline.ExecuteAsync(Sales, sql, Cancel),
+        _ => throw new ArgumentOutOfRangeException(nameof(tool), tool, null),
+    };
 
     private static JsonObject Json(ToolResult result)
     {
