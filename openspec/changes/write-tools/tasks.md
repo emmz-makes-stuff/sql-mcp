@@ -43,8 +43,8 @@
 
 ## 7. End-to-end check
 
-- [ ] 7.1 Through the real MCP server over stdio in an integration test, with `command`, `ddl` and `execute` allowed on the test container: create a table with `ddl`, insert and update with `command`, run a procedure with `execute`, and read the result with `query`. Check that the audit log has the matching `executed` events with rows affected. Verify that the test passes in `make itest`
-- [ ] 7.2 **Human verification (stop and ask):** in a real Claude Code session registered with `sql-mcp register claude --scope project`, with `command` allowed on a scratch database, have the agent update rows, hit the WHERE rule and the affected-rows cap, and confirm Claude Code treats the write tools as destructive. Record the result in a devlog note
+- [x] 7.1 Through the real MCP server over stdio in an integration test, with `command`, `ddl` and `execute` allowed on the test container: create a table with `ddl`, insert and update with `command`, run a procedure with `execute`, and read the result with `query`. Check that the audit log has the matching `executed` events with rows affected. Verify that the test passes in `make itest`
+- [x] 7.2 **Human verification (stop and ask):** in a real Claude Code session registered with `sql-mcp register claude --scope project`, with `command` allowed on a scratch database, have the agent update rows, hit the WHERE rule and the affected-rows cap, and confirm Claude Code treats the write tools as destructive. Record the result in a devlog note
 
 ## Workflow follow-up
 

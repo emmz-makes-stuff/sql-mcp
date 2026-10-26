@@ -36,12 +36,7 @@ public sealed class ServeTests : IAsyncLifetime
     {
         Directory.CreateDirectory(Home);
         Directory.CreateDirectory(Path.Combine(Project, ".sql-mcp"));
-        var config = new JsonObject { ["databases"] = new JsonArray(new JsonObject { ["connectionString"] = _db.ConnectionString }) };
-        await File.WriteAllTextAsync(Path.Combine(Project, ".sql-mcp", "config.json"), config.ToJsonString());
-
-        // A project-only database is unavailable until a person approves it; stand in for them here.
-        var paths = ConfigPaths.Create(isWindows: false, Home, Home, Project, projectDirectory: null);
-        new ApprovalStore(paths.Approvals, TimeProvider.System).Approve(ConfigLoader.Load(paths.ProjectConfig, _ => null));
+        await WriteApprovedConfig(new JsonObject());
 
         await _db.ScalarAsync($"CREATE TABLE dbo.{_table} (id int, name nvarchar(50)); INSERT INTO dbo.{_table} VALUES (1, N'alice'), (2, N'bob'), (3, N'carol')");
     }
@@ -156,6 +151,62 @@ public sealed class ServeTests : IAsyncLifetime
         var events = await AuditEvents();
         Assert.Equal(["session_start", "session_end"], events.Select(e => e["event"]!.GetValue<string>()));
         Assert.Equal(Path.Combine(Project, ".sql-mcp", "config.json"), events[1]["config_files"]![0]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Writes_through_each_write_tool()
+    {
+        var pets = $"pets_{Guid.NewGuid():N}";
+        var rename = $"rename_{Guid.NewGuid():N}";
+        await WriteApprovedConfig(new JsonObject { ["allow"] = new JsonArray("command", "ddl", "execute") });
+
+        // ddl refuses procedures, so the test creates this one itself. Its table comes later, from ddl.
+        await _db.ScalarAsync($"CREATE PROCEDURE dbo.{rename} @id int, @name nvarchar(50) AS UPDATE dbo.{pets} SET name = @name WHERE id = @id");
+        var client = await Connect();
+
+        var tools = await client.ListToolsAsync(cancellationToken: Cancel);
+        Assert.Equal(["abandon", "command", "ddl", "execute", "list_databases", "next_page", "query"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
+
+        var created = await Write(client, "ddl", $"CREATE TABLE dbo.{pets} (id int PRIMARY KEY, name nvarchar(50))");
+        Assert.Equal("[]", created["rows_affected"]!.ToJsonString());
+
+        var inserted = await Write(client, "command", $"INSERT INTO dbo.{pets} VALUES (1, N'rex'), (2, N'tom'), (3, N'kit'); UPDATE dbo.{pets} SET name = N'felix' WHERE id = 2");
+        Assert.Equal("[3,1]", inserted["rows_affected"]!.ToJsonString());
+
+        var executed = await Write(client, "execute", $"EXEC dbo.{rename} @id = 3, @name = N'luna'");
+        Assert.Equal("[1]", executed["rows_affected"]!.ToJsonString());
+
+        var read = await Call(client, "query", new() { ["database"] = Database, ["sql"] = $"SELECT id, name FROM dbo.{pets} ORDER BY id" });
+        Assert.NotEqual(true, read.IsError);
+        Assert.Equal("""[[1,"rex"],[2,"felix"],[3,"luna"]]""", JsonNode.Parse(Text(read))!["rows"]!.ToJsonString());
+
+        var events = (await AuditEvents()).Where(e => e["event"]!.GetValue<string>() == "executed").ToList();
+        Assert.Equal(["ddl", "command", "execute", "query"], events.Select(e => e["tool"]!.GetValue<string>()));
+        Assert.Equal(["[]", "[3,1]", "[1]"], events.Take(3).Select(e => e["rows_affected"]!.ToJsonString()));
+        Assert.Null(events[3]["rows_affected"]);
+    }
+
+    /// <summary>Writes the project config with one database entry and approves it, as a person would.</summary>
+    private async Task WriteApprovedConfig(JsonObject database)
+    {
+        database["connectionString"] = _db.ConnectionString;
+        var config = new JsonObject { ["databases"] = new JsonArray(database) };
+        await File.WriteAllTextAsync(Path.Combine(Project, ".sql-mcp", "config.json"), config.ToJsonString());
+
+        // A project-only database is unavailable until a person approves it, and widening needs approval too.
+        var paths = ConfigPaths.Create(isWindows: false, Home, Home, Project, projectDirectory: null);
+        new ApprovalStore(paths.Approvals, TimeProvider.System).Approve(ConfigLoader.Load(paths.ProjectConfig, _ => null));
+    }
+
+    /// <summary>Calls a write tool and checks that it committed with no result sets.</summary>
+    private async Task<JsonNode> Write(McpClient client, string tool, string sql)
+    {
+        var result = await Call(client, tool, new() { ["database"] = Database, ["sql"] = sql });
+        Assert.True(result.IsError != true, Text(result));
+        var response = JsonNode.Parse(Text(result))!;
+        Assert.True(response["committed"]!.GetValue<bool>());
+        Assert.Null(response["handle"]);
+        return response;
     }
 
     private async Task<McpClient> Connect()
