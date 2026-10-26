@@ -50,6 +50,11 @@
 
 - [x] 8.1 Reword the affected-rows cap error in `SqlServerQueryExecutor.CapFailed` so the agent reads the count as exact, not a lower bound (§7.2 finding): "over the affected-rows cap: the statements that completed affected N rows, over this database's cap of C, so the batch was stopped. It was rolled back, so nothing was committed. Narrow the WHERE clause, or split the change into smaller batches." Update the assertions that pin the old text (`SqlServerWriteExecutorTests`, `ToolPipelineTests`). Verify with the "Over the cap" scenario's integration test in `make itest`
 
+## 9. Review fixes: ddl batches
+
+- [ ] 9.1 Refuse, before anything is sent, a `ddl` batch in which `CREATE VIEW`, `ALTER VIEW`, `CREATE OR ALTER VIEW` or `CREATE SCHEMA` is not the only statement: SQL Server rejects these batches with Msg 111, and `CREATE SCHEMA` takes what follows it as schema elements (whole-change review finding). The reason says that statement must be the only statement in its call. Verify with classifier table rows (alone accepted; with a table before or after refused), and with an integration test that creates a schema, a table and a view through `ddl`, one call each, then reads the view with `query`
+- [ ] 9.2 Say in `ddl`'s description and in `docs/classifier.md` that a view or schema statement goes in a call of its own. Take the result-set and paging wording out of `ddl`'s description, since ddl returns none and its `rows_affected` is always empty. Verify with catalog tests on the `ddl` description
+
 ## Workflow follow-up
 
 - Run the whole-change review and offer `code-review` before archiving.
