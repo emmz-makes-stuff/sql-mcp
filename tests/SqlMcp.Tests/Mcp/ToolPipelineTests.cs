@@ -219,15 +219,33 @@ public sealed class ToolPipelineTests : IDisposable
     }
 
     [Fact]
-    public async Task Rejected_statement()
+    public async Task Wrong_tool()
     {
-        _builder.User(OneDatabase);
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
         using var session = _builder.Build();
 
         var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users WHERE id = 1", Cancel);
 
         Assert.True(result.IsError);
-        Assert.Equal("Rejected, nothing was sent to the database: classified as command; this server has no command tool yet", result.Text);
+        Assert.Equal("Rejected, nothing was sent to the database: classified as command; use the command tool", result.Text);
+        Assert.Empty(_builder.Executor.Calls);
+    }
+
+    [Fact]
+    public async Task Right_tool_is_denied_here()
+    {
+        // command is allowed on another database, but the reason is about the target one.
+        _builder.User("""
+            { "databases": [
+                { "connectionString": "Server=sqlhost;Database=Sales" },
+                { "connectionString": "Server=sqlhost;Database=Scratch", "allow": ["command"] } ] }
+            """);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users WHERE id = 1", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("Rejected, nothing was sent to the database: classified as command; the command tool is denied on this database", result.Text);
         Assert.Empty(_builder.Executor.Calls);
 
         var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");

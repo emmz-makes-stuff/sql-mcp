@@ -55,7 +55,7 @@ internal sealed record ClassificationResult(IReadOnlyList<StatementClassificatio
     /// <summary>
     /// Accepts the batch for the tool of <paramref name="tool"/> only if every statement is in that category.
     /// Otherwise the whole batch is rejected, naming each statement that doesn't fit and the tool that would run
-    /// it, or, if it isn't in <paramref name="withTools"/>, that the server has no such tool yet.
+    /// it, or, if it isn't in <paramref name="withTools"/>, that the tool is denied on this database.
     /// </summary>
     public BatchVerdict ForTool(StatementCategory tool, IReadOnlySet<StatementCategory> withTools)
     {
@@ -96,6 +96,6 @@ internal sealed record ClassificationResult(IReadOnlyList<StatementClassificatio
         var name = statement.Category.ToName();
         return withTools.Contains(statement.Category)
             ? $"classified as {name}; use the {name} tool"
-            : $"classified as {name}; this server has no {name} tool yet";
+            : $"classified as {name}; the {name} tool is denied on this database";
     }
 }

@@ -61,7 +61,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
 
         var engine = session.Engines[db.Entry.Engine];
         var classification = engine.Classifier.Classify(sql);
-        var verdict = classification.ForTool(StatementCategory.Query, ToolCatalog.Categories);
+        var verdict = classification.ForTool(StatementCategory.Query, AllowedCategories(db));
         if (!verdict.Accepted)
         {
             var reason = $"Rejected, nothing was sent to the database: {verdict.Reason}";
@@ -148,6 +148,21 @@ internal sealed class ToolPipeline(SqlMcpSession session)
         var reason = $"{grant.Group.ToConfigName()} is denied on {db.Identifier} (source: {grant.Source.ToDisplayName()}).";
         return grant.Reason is null ? reason : $"{reason} {grant.Reason}";
     }
+
+    /// <summary>
+    /// The statement categories whose tool's group is allowed on <paramref name="db"/>, so a wrong-tool refusal can
+    /// say whether the right tool would run there (design W6).
+    /// </summary>
+    private static HashSet<StatementCategory> AllowedCategories(EffectiveDatabase db) =>
+        CategoryGroups.Where(pair => db.IsAllowed(pair.Value)).Select(pair => pair.Key).ToHashSet();
+
+    private static readonly Dictionary<StatementCategory, ToolGroup> CategoryGroups = new()
+    {
+        [StatementCategory.Query] = ToolGroup.Query,
+        [StatementCategory.Command] = ToolGroup.Command,
+        [StatementCategory.Ddl] = ToolGroup.Ddl,
+        [StatementCategory.Execute] = ToolGroup.Execute,
+    };
 
     /// <summary>The refusal every database tool starts with: no audit log, or no usable config.</summary>
     private ToolResult? Refusal()

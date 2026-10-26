@@ -23,7 +23,7 @@
 
 ## 4. Wrong-tool reasons per database
 
-- [ ] 4.1 Make the pipeline pass `ForTool` the categories whose group is allowed on the target database. Replace "this server has no X tool yet" with "the X tool is denied on this database", and remove `ToolCatalog.Categories` (design W6). Verify with pipeline tests for "Wrong tool" and "Right tool is denied here"
+- [x] 4.1 Make the pipeline pass `ForTool` the categories whose group is allowed on the target database. Replace "this server has no X tool yet" with "the X tool is denied on this database", and remove `ToolCatalog.Categories` (design W6). Verify with pipeline tests for "Wrong tool" and "Right tool is denied here"
 
 ## 5. Write execution
 

@@ -109,7 +109,7 @@ public sealed class ServeTests : IAsyncLifetime
         var result = await Call(client, "query", new() { ["database"] = Database, ["sql"] = $"DELETE FROM dbo.{_table} WHERE 1 = 1" });
 
         Assert.True(result.IsError);
-        Assert.Equal("Rejected, nothing was sent to the database: classified as command; this server has no command tool yet", Text(result));
+        Assert.Equal("Rejected, nothing was sent to the database: classified as command; the command tool is denied on this database", Text(result));
         Assert.Equal(3, await _db.ScalarAsync($"SELECT COUNT(*) FROM dbo.{_table}"));
 
         var events = await AuditEvents();

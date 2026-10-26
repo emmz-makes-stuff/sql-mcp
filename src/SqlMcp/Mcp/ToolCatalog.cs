@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Reflection;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using SqlMcp.Classification;
 using SqlMcp.Execution;
 using SqlMcp.Permissions;
 
@@ -53,12 +52,6 @@ internal static class ToolDescriptions
 /// </summary>
 internal static class ToolCatalog
 {
-    /// <summary>
-    /// The statement categories this release has a tool for, so a refusal can say whether another tool would run
-    /// the statement. The write-tools change adds command, ddl and execute.
-    /// </summary>
-    public static readonly IReadOnlySet<StatementCategory> Categories = new HashSet<StatementCategory> { StatementCategory.Query };
-
     public static IReadOnlyList<McpServerTool> Build(SqlMcpSession session)
     {
         var tools = new SqlMcpTools(new ToolPipeline(session));

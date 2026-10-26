@@ -121,21 +121,21 @@ public class ClassifierTests
     }
 
     [Fact]
-    public void Wrong_tool_that_the_server_does_not_have_yet()
+    public void Wrong_tool_that_is_denied_on_the_database()
     {
         var verdict = _classifier.Classify("DELETE FROM t WHERE id = 1").ForTool(StatementCategory.Query, QueryOnly);
 
-        Assert.Equal(BatchVerdict.Reject("classified as command; this server has no command tool yet"), verdict);
+        Assert.Equal(BatchVerdict.Reject("classified as command; the command tool is denied on this database"), verdict);
     }
 
     [Fact]
-    public void Mixed_batch_says_which_tools_the_server_does_not_have_yet()
+    public void Mixed_batch_says_which_tools_are_denied_on_the_database()
     {
         var verdict = _classifier.Classify("SELECT 1; DROP TABLE t").ForTool(StatementCategory.Query, QueryOnly);
 
         Assert.Equal(
             BatchVerdict.Reject(
-                "statement 2 (line 1) classified as ddl; this server has no ddl tool yet. The whole batch is rejected, so nothing in it runs."),
+                "statement 2 (line 1) classified as ddl; the ddl tool is denied on this database. The whole batch is rejected, so nothing in it runs."),
             verdict);
     }
 
