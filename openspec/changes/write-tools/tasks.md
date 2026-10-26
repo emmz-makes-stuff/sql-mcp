@@ -52,8 +52,8 @@
 
 ## 9. Review fixes: ddl batches
 
-- [ ] 9.1 Refuse, before anything is sent, a `ddl` batch in which `CREATE VIEW`, `ALTER VIEW`, `CREATE OR ALTER VIEW` or `CREATE SCHEMA` is not the only statement: SQL Server rejects these batches with Msg 111, and `CREATE SCHEMA` takes what follows it as schema elements (whole-change review finding). The reason says that statement must be the only statement in its call. Verify with classifier table rows (alone accepted; with a table before or after refused), and with an integration test that creates a schema, a table and a view through `ddl`, one call each, then reads the view with `query`
-- [ ] 9.2 Say in `ddl`'s description and in `docs/classifier.md` that a view or schema statement goes in a call of its own. Take the result-set and paging wording out of `ddl`'s description, since ddl returns none and its `rows_affected` is always empty. Verify with catalog tests on the `ddl` description
+- [x] 9.1 Explain the refusal of a batch in which `CREATE VIEW`, `ALTER VIEW`, `CREATE OR ALTER VIEW` or `CREATE SCHEMA` is not the only statement (whole-change review finding). SQL Server rejects these batches with Msg 111. ScriptDom already refuses them before anything is sent, but only as "Incorrect syntax near 'CREATE'" (rescoped with Emmz). The reason now starts by saying that statement must be the only statement in its call, then gives the parser's errors. Verify with classifier tests (each statement with another before or after it gets the hint; other syntax errors don't; other ddl statements still share a call), and with an integration test that creates a schema, a table and a view through `ddl`, one call each, then reads the view with `query`
+- [x] 9.2 Say in `ddl`'s description and in `docs/classifier.md` that a view or schema statement goes in a call of its own. Take the result-set and paging wording out of `ddl`'s description, since ddl returns none and its `rows_affected` is always empty. Verify with catalog tests on the `ddl` description
 
 ## Workflow follow-up
 

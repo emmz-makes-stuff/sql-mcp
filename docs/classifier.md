@@ -77,6 +77,10 @@ example below is a row in `ClassifierTable`.
   - `CREATE SCHEMA` is accepted only bare (`CREATE SCHEMA reporting`). `AUTHORIZATION` sets an owner, which is a
     security change. Schema elements must each be sent as their own statement. `ALTER SCHEMA … TRANSFER` is
     rejected, because moving an object between schemas can change who may use it.
+  - **View and schema statements go alone.** SQL Server runs `CREATE VIEW`, `ALTER VIEW`, `CREATE OR ALTER VIEW`
+    and `CREATE SCHEMA` only as the only statement in a batch (Msg 111), and ScriptDom enforces that as a syntax
+    error. Such a batch is refused before anything is sent. The reason starts with, for example, "CREATE VIEW must
+    be the only statement in its call: send it on its own", then gives the parser's errors.
 - **execute:** `EXEC` of a user procedure, with parameters given by position or by name. Each value must be a
   literal, `NULL` or a negated number: `EXEC dbo.p NULL, -5, 1.5, N'x', 0x1F`. The parser already refuses
   expressions such as `1 + 2` as parameter values. The classifier refuses variables (`EXEC dbo.p @a = @x`) and

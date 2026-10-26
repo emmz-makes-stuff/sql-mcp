@@ -31,27 +31,31 @@ internal static class ToolDescriptions
     private const string WriteGuidance =
         "The batch runs in one transaction and commits all or nothing: if any statement fails, the batch times out, or its statements together affect more rows than the affected-rows cap, everything is rolled back. " +
         "Make each change as narrow as you can. A change over the cap runs in full before it is undone, holding locks while it runs and while it rolls back, so before a change that could touch many rows, count the matching rows with query first. " +
-        "Name objects in this database only: a name with a database or server part is refused. " +
+        "Name objects in this database only: a name with a database or server part is refused. ";
+
+    /// <summary>What command and execute return; ddl returns no rows, so it says less (see <see cref="DdlGuidance"/>).</summary>
+    private const string RowsGuidance =
         "Returns committed: true and the rows each statement affected; any result sets are buffered and paged as for query.";
 
     public const string CommandGuidance =
         "Changes data on one database with INSERT, UPDATE, DELETE or MERGE. " +
         "Every statement must be a command; anything else is refused before it reaches the database. " +
         "UPDATE and DELETE need a WHERE clause that picks the rows to change. OUTPUT returns the changed rows. " +
-        WriteGuidance;
+        WriteGuidance + RowsGuidance;
 
     public const string DdlGuidance =
         "Changes the schema of one database: tables, columns, constraints, indexes, views, schemas and sequences, and TRUNCATE TABLE. " +
         "Procedures, functions, triggers, and users, roles and permissions can't be created or changed. A view's SELECT must be a valid query. " +
         "Every statement must be ddl; anything else is refused before it reaches the database. " +
-        WriteGuidance;
+        "CREATE VIEW, ALTER VIEW, CREATE OR ALTER VIEW and CREATE SCHEMA must each be sent in a call of their own. " +
+        WriteGuidance + "Returns committed: true.";
 
     public const string ExecuteGuidance =
         "Runs an existing stored procedure on one database with EXEC, passing each parameter as a literal or NULL. " +
         "System procedures (the sys schema, and names starting sp_ or xp_), dynamic SQL and EXEC of a string are refused. " +
         "The procedure does whatever its code does, so run only procedures you understand. " +
         "The affected-rows cap counts every row count the server reports, including rows a procedure's SELECT returns; a procedure that sets NOCOUNT ON reports none, so the cap can't see its changes. " +
-        WriteGuidance;
+        WriteGuidance + RowsGuidance;
 
     /// <summary>A write tool's guidance plus the affected-rows cap: the default, then any database it runs on whose cap differs.</summary>
     public static string Write(string guidance, ToolGroup group, IEnumerable<EffectiveDatabase> databases)

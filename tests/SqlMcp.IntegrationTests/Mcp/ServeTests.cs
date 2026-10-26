@@ -186,6 +186,27 @@ public sealed class ServeTests : IAsyncLifetime
         Assert.Null(events[3]["rows_affected"]);
     }
 
+    [Fact]
+    public async Task Schema_table_and_view_through_ddl()
+    {
+        var schema = $"s_{Guid.NewGuid():N}";
+        await WriteApprovedConfig(new JsonObject { ["allow"] = new JsonArray("ddl") });
+        var client = await Connect();
+
+        var together = await Call(client, "ddl", new() { ["database"] = Database, ["sql"] = $"CREATE SCHEMA {schema}; CREATE TABLE {schema}.t (a int)" });
+        Assert.True(together.IsError);
+        Assert.StartsWith("Rejected, nothing was sent to the database: CREATE SCHEMA must be the only statement in its call", Text(together), StringComparison.Ordinal);
+
+        await Write(client, "ddl", $"CREATE SCHEMA {schema}");
+        await Write(client, "ddl", $"CREATE TABLE {schema}.t (a int); ALTER TABLE {schema}.t ADD b int");
+        await Write(client, "ddl", $"CREATE VIEW {schema}.v AS SELECT a, b FROM {schema}.t");
+        await _db.ScalarAsync($"INSERT INTO {schema}.t VALUES (1, 2)");
+
+        var read = await Call(client, "query", new() { ["database"] = Database, ["sql"] = $"SELECT a, b FROM {schema}.v" });
+        Assert.NotEqual(true, read.IsError);
+        Assert.Equal("[[1,2]]", JsonNode.Parse(Text(read))!["rows"]!.ToJsonString());
+    }
+
     /// <summary>Writes the project config with one database entry and approves it, as a person would.</summary>
     private async Task WriteApprovedConfig(JsonObject database)
     {

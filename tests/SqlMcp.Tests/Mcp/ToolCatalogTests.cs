@@ -178,6 +178,23 @@ public sealed class ToolCatalogTests : IDisposable
     }
 
     [Fact]
+    public void The_ddl_description_sends_views_and_schemas_alone_and_promises_no_rows()
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        var ddl = Tool(session, ToolNames.Ddl).Description;
+        var command = Tool(session, ToolNames.Command).Description;
+
+        Assert.Contains("CREATE VIEW, ALTER VIEW, CREATE OR ALTER VIEW and CREATE SCHEMA must each be sent in a call of their own.", ddl, StringComparison.Ordinal);
+        Assert.Contains("Returns committed: true. Default affected-rows cap", ddl, StringComparison.Ordinal);
+        Assert.DoesNotContain("result sets", ddl, StringComparison.Ordinal);
+        Assert.DoesNotContain("rows each statement affected", ddl, StringComparison.Ordinal);
+        Assert.Contains("any result sets are buffered and paged as for query", command, StringComparison.Ordinal);
+        Assert.Contains("any result sets are buffered and paged as for query", Tool(session, ToolNames.Execute).Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_query_tool_keeps_its_read_only_annotations()
     {
         _builder.User(AllWrites);

@@ -112,6 +112,37 @@ public class ClassifierTests
         Assert.False(result.ForTool(StatementCategory.Command, AllTools).Accepted);
     }
 
+    [Theory]
+    [InlineData("CREATE TABLE dbo.t (a int); CREATE VIEW dbo.v AS SELECT a FROM dbo.t", "CREATE VIEW")]
+    [InlineData("CREATE VIEW dbo.v AS SELECT a FROM dbo.t; CREATE INDEX ix ON dbo.t (a)", "CREATE VIEW")]
+    [InlineData("DROP VIEW dbo.v; ALTER VIEW dbo.w AS SELECT a FROM dbo.t", "ALTER VIEW")]
+    [InlineData("CREATE OR ALTER VIEW dbo.v AS SELECT a FROM dbo.t; DROP TABLE dbo.u", "CREATE OR ALTER VIEW")]
+    [InlineData("CREATE TABLE dbo.t (a int); CREATE SCHEMA reporting", "CREATE SCHEMA")]
+    [InlineData("CREATE SCHEMA reporting; CREATE TABLE reporting.t (a int)", "CREATE SCHEMA")]
+    public void A_view_or_schema_statement_that_is_not_alone_says_so(string sql, string statement)
+    {
+        var verdict = _classifier.Classify(sql).ForTool(StatementCategory.Ddl, AllTools);
+
+        Assert.False(verdict.Accepted);
+        Assert.StartsWith($"{statement} must be the only statement in its call: send it on its own. The parser reported: syntax error at line 1", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("CREATE VIEW dbo.v AS SELEC a FROM dbo.t")]
+    [InlineData("CREATE TABLE dbo.t (a int; CREATE INDEX ix ON dbo.t (a)")]
+    public void Other_syntax_errors_have_no_hint(string sql)
+    {
+        var verdict = _classifier.Classify(sql).ForTool(StatementCategory.Ddl, AllTools);
+
+        Assert.StartsWith("syntax error at line 1", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Other_ddl_statements_share_a_call()
+    {
+        Assert.True(_classifier.Classify("CREATE TABLE dbo.t (a int); CREATE INDEX ix ON dbo.t (a); DROP VIEW dbo.v").ForTool(StatementCategory.Ddl, AllTools).Accepted);
+    }
+
     [Fact]
     public void Wrong_tool()
     {

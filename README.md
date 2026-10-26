@@ -121,7 +121,8 @@ What each write group accepts:
   refused.
 - **ddl** refuses procedures, functions and triggers, whose bodies would run later unseen, and every security
   change (users, roles, permissions, `CREATE SCHEMA … AUTHORIZATION`, `ALTER SCHEMA … TRANSFER`). A view's
-  `SELECT` must be a valid query.
+  `SELECT` must be a valid query. SQL Server runs a view or schema statement only on its own, so each goes in a
+  call of its own.
 - **execute** refuses system procedures (the `sys` schema, and names starting `sp_` or `xp_`), dynamic SQL, and
   `EXEC` of a string. An `execute` grant trusts the database's procedures: sql-mcp checks the `EXEC`, never the
   procedure's body.

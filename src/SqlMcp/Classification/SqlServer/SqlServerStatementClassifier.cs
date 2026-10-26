@@ -22,8 +22,9 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
 
         if (errors.Count > 0)
         {
-            return new ClassificationResult([], string.Join("; ", errors.Select(e =>
-                $"syntax error at line {e.Line.ToString(CultureInfo.InvariantCulture)}, column {e.Column.ToString(CultureInfo.InvariantCulture)}: {e.Message}")));
+            var syntax = string.Join("; ", errors.Select(e =>
+                $"syntax error at line {e.Line.ToString(CultureInfo.InvariantCulture)}, column {e.Column.ToString(CultureInfo.InvariantCulture)}: {e.Message}"));
+            return new ClassificationResult([], OwnCallHint(sql, errors) is { } hint ? $"{hint}. The parser reported: {syntax}" : syntax);
         }
 
         // SqlClient can't run GO, and splitting batches silently would hide what runs.
@@ -39,6 +40,50 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
         }
 
         return new ClassificationResult(statements.Select((s, i) => Classify(s, i + 1)).ToList());
+    }
+
+    /// <summary>
+    /// SQL Server runs a view or schema statement only alone in its batch (Msg 111), and ScriptDom enforces that as a
+    /// bare "Incorrect syntax near 'CREATE'". This says why, when the batch has one that isn't alone: something comes
+    /// before it, or the parser failed at a later statement after it.
+    /// </summary>
+    private static string? OwnCallHint(string sql, IList<ParseError> errors)
+    {
+        IList<TSqlParserToken> tokens;
+        using (var reader = new StringReader(sql))
+        {
+            tokens = new TSql170Parser(initialQuotedIdentifiers: true).GetTokenStream(reader, out _);
+        }
+
+        var words = tokens.Where(t => t.TokenType is not (TSqlTokenType.WhiteSpace or TSqlTokenType.SingleLineComment
+            or TSqlTokenType.MultilineComment or TSqlTokenType.Semicolon or TSqlTokenType.EndOfFile)).ToList();
+        var statementStarts = words
+            .Where(t => t.TokenType is TSqlTokenType.Create or TSqlTokenType.Alter or TSqlTokenType.Drop or TSqlTokenType.Truncate)
+            .Select(t => t.Offset)
+            .ToHashSet();
+        for (var i = 0; i < words.Count; i++)
+        {
+            if (OwnCallStatement(words, i) is { } name
+                && (i > 0 || errors.Any(e => e.Offset > words[i].Offset && statementStarts.Contains(e.Offset))))
+            {
+                return $"{name} must be the only statement in its call: send it on its own";
+            }
+        }
+
+        return null;
+    }
+
+    private static string? OwnCallStatement(List<TSqlParserToken> words, int i)
+    {
+        TSqlTokenType At(int offset) => i + offset < words.Count ? words[i + offset].TokenType : TSqlTokenType.None;
+        return (At(0), At(1), At(2), At(3)) switch
+        {
+            (TSqlTokenType.Create, TSqlTokenType.View, _, _) => "CREATE VIEW",
+            (TSqlTokenType.Alter, TSqlTokenType.View, _, _) => "ALTER VIEW",
+            (TSqlTokenType.Create, TSqlTokenType.Or, TSqlTokenType.Alter, TSqlTokenType.View) => "CREATE OR ALTER VIEW",
+            (TSqlTokenType.Create, TSqlTokenType.Schema, _, _) => "CREATE SCHEMA",
+            _ => null,
+        };
     }
 
     private static StatementClassification Classify(TSqlStatement statement, int number)
