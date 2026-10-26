@@ -46,6 +46,10 @@
 - [x] 7.1 Through the real MCP server over stdio in an integration test, with `command`, `ddl` and `execute` allowed on the test container: create a table with `ddl`, insert and update with `command`, run a procedure with `execute`, and read the result with `query`. Check that the audit log has the matching `executed` events with rows affected. Verify that the test passes in `make itest`
 - [x] 7.2 **Human verification (stop and ask):** in a real Claude Code session registered with `sql-mcp register claude --scope project`, with `command` allowed on a scratch database, have the agent update rows, hit the WHERE rule and the affected-rows cap, and confirm Claude Code treats the write tools as destructive. Record the result in a devlog note
 
+## 8. Review fixes: cap message
+
+- [ ] 8.1 Reword the affected-rows cap error in `SqlServerQueryExecutor.CapFailed` so the agent reads the count as exact, not a lower bound (§7.2 finding): "over the affected-rows cap: the statements that completed affected N rows, over this database's cap of C, so the batch was stopped. It was rolled back, so nothing was committed. Narrow the WHERE clause, or split the change into smaller batches." Update the assertions that pin the old text (`SqlServerWriteExecutorTests`, `ToolPipelineTests`). Verify with the "Over the cap" scenario's integration test in `make itest`
+
 ## Workflow follow-up
 
 - Run the whole-change review and offer `code-review` before archiving.
