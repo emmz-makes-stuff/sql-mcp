@@ -40,8 +40,14 @@ internal static class LaunchCommand
             return false;
         }
 
-        string[] names = context.IsWindows ? [$"{program}.exe", $"{program}.cmd", program] : [program];
+        if (context.IsWindows)
+        {
+            // Found only as a PATHEXT file, the way the shell and SystemProcessRunner would start it.
+            var resolved = ProgramLookup.Resolve(program, path, context.GetVariable("PATHEXT"), File.Exists);
+            return !string.Equals(resolved, program, StringComparison.Ordinal);
+        }
+
         return path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Any(directory => names.Any(name => File.Exists(Path.Combine(directory, name))));
+            .Any(directory => File.Exists(Path.Combine(directory, program)));
     }
 }

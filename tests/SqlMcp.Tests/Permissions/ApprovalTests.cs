@@ -125,6 +125,21 @@ public sealed class ApprovalTests : IDisposable
     }
 
     [Fact]
+    public void Approving_through_a_linked_store_keeps_the_link()
+    {
+        var path = WriteProject("""{ "databases": [] }""");
+        var target = _temp.Write("dotfiles/approvals.json", "{}");
+        Directory.CreateDirectory(Path.GetDirectoryName(_store.Path)!);
+        File.CreateSymbolicLink(_store.Path, target);
+
+        _store.Approve(Load(path));
+
+        Assert.Equal(target, new FileInfo(_store.Path).LinkTarget);
+        Assert.Single(JsonNode.Parse(File.ReadAllText(target))!.AsObject());
+        Assert.True(_store.Read(Load(path)).FileApproved);
+    }
+
+    [Fact]
     public void Denial_wording_is_addressed_to_a_person()
     {
         var messages = new[]

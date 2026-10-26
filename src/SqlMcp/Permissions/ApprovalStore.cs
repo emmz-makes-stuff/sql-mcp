@@ -69,10 +69,7 @@ internal sealed class ApprovalStore(string path, TimeProvider time)
             ["databases"] = databases,
         };
 
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-        var temp = $"{Path}.{Guid.NewGuid():N}.tmp";
-        File.WriteAllText(temp, approvals.ToJsonString(WriteOptions));
-        File.Move(temp, Path, overwrite: true);
+        AtomicFile.WriteAllText(Path, approvals.ToJsonString(WriteOptions));
     }
 
     private JsonObject? TryRead()

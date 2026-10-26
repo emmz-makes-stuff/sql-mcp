@@ -21,8 +21,10 @@ internal sealed class CliRunner : IDisposable
 
     public FakeProcessRunner Processes { get; } = new();
 
+    public bool IsWindows { get; set; }
+
     public CliContext Context => new(
-        IsWindows: false,
+        IsWindows: IsWindows,
         HomeDirectory: _home.Path,
         AppDataDirectory: _home.Path,
         CurrentDirectory: _project.Path,

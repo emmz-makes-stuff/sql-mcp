@@ -116,6 +116,26 @@ public sealed class RegisterCommandTests : IDisposable
         Assert.Equal("serve", add[8]);
     }
 
+    [Theory]
+    [InlineData("sql-mcp.bat", "sql-mcp")]
+    [InlineData("sql-mcp", "dnx")]
+    public async Task On_windows_sql_mcp_is_on_path_only_with_a_PATHEXT_extension(string installed, string launcher)
+    {
+        var a = Path.Combine(_cli.HomeDirectory, "a");
+        var b = Path.Combine(_cli.HomeDirectory, "b");
+        Directory.CreateDirectory(a);
+        Directory.CreateDirectory(b);
+        File.WriteAllText(Path.Combine(b, installed), "");
+        _cli.IsWindows = true;
+        _cli.Variables["PATH"] = $"{a};{b}";
+        _cli.Variables["PATHEXT"] = ".BAT";
+        _cli.Processes.On("claude", ["mcp", "get"], NotFoundExit);
+
+        await _cli.RunAsync("register", "claude");
+
+        Assert.Equal(launcher, _cli.Processes.CallsTo("claude").Last()[6]);
+    }
+
     [Fact]
     public async Task Launcher_option_overrides_detection()
     {

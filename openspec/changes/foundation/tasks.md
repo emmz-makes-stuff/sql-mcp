@@ -92,10 +92,10 @@
 
 ## 16. Review fixes: cleanup
 
-- [ ] 16.1 Make `ApprovalStore.Approve` write through `AtomicFile.WriteAllText`
-- [ ] 16.2 Make `AtomicFile` keep a symlinked target: resolve the link and write the temp file and rename beside the real file. Verify with a test that edits a symlinked config
-- [ ] 16.3 Make `LaunchCommand.IsOnPath` use `ProgramLookup.Resolve`, so it honours PATHEXT. Verify with launch command tests
-- [ ] 16.4 Delete `tests/SqlMcp.Tests/PlaceholderTests.cs`
+- [x] 16.1 Make `ApprovalStore.Approve` write through `AtomicFile.WriteAllText`
+- [x] 16.2 Make `AtomicFile` keep a symlinked target: resolve the link and write the temp file and rename beside the real file. Verify with a test that edits a symlinked config
+- [x] 16.3 Make `LaunchCommand.IsOnPath` use `ProgramLookup.Resolve`, so it honours PATHEXT. Verify with launch command tests
+- [x] 16.4 Delete `tests/SqlMcp.Tests/PlaceholderTests.cs`
 
 ## Workflow follow-up
 

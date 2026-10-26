@@ -46,6 +46,20 @@ public sealed class ConfigFileEditorTests : IDisposable
     }
 
     [Fact]
+    public void Edit_through_a_symbolic_link_writes_the_target_and_keeps_the_link()
+    {
+        var target = _temp.Write("dotfiles/config.json", """{ "databases": [] }""");
+        var link = Path.Combine(_temp.Path, "config.json");
+        File.CreateSymbolicLink(link, target);
+
+        ConfigFileEditor.Apply(link, InitCommand.ConfigContent, editor => editor.Set(["defaults"], new JsonObject { ["allow"] = new JsonArray("query") }));
+
+        Assert.Equal(target, new FileInfo(link).LinkTarget);
+        Assert.Contains("\"allow\":[\"query\"]", File.ReadAllText(target), StringComparison.Ordinal);
+        Assert.Equal(["config.json"], Directory.GetFiles(Path.Combine(_temp.Path, "dotfiles")).Select(Path.GetFileName));
+    }
+
+    [Fact]
     public void Edit_that_duplicates_a_database_throws()
     {
         var path = _temp.Write("config.json", """{ "databases": [ { "connectionString": "Server=a;Database=b" } ] }""");
