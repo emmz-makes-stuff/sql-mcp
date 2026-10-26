@@ -27,10 +27,10 @@ internal static class PermissionSourceNames
 internal sealed record GroupGrant(ToolGroup Group, bool Allowed, PermissionSource Source, string? Reason = null);
 
 /// <summary>The limits in force for one database.</summary>
-internal sealed record EffectiveLimits(int MaxRows, long MaxBytes, int PageSize, int TimeoutSeconds)
+internal sealed record EffectiveLimits(int MaxRows, long MaxBytes, int PageSize, int TimeoutSeconds, int MaxAffectedRows)
 {
-    /// <summary>Design D7: 1000 rows, 5 MB, 100 rows per page, 30 seconds.</summary>
-    public static readonly EffectiveLimits Default = new(1000, 5 * 1024 * 1024, 100, 30);
+    /// <summary>Design D7: 1000 rows, 5 MB, 100 rows per page, 30 seconds; write-tools W8: 1000 affected rows.</summary>
+    public static readonly EffectiveLimits Default = new(1000, 5 * 1024 * 1024, 100, 30, 1000);
 }
 
 /// <summary>A database after layering: its entry, a grant per group, its limits, and any ignored widening.</summary>

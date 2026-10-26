@@ -111,12 +111,12 @@ public class ConfigLoaderTests
     {
         const string text = """
             { "databases": [ { "connectionString": "Server=a;Database=b",
-                               "limits": { "maxRows": 50, "maxBytes": 1048576, "pageSize": 10, "timeoutSeconds": 5 } } ] }
+                               "limits": { "maxRows": 50, "maxBytes": 1048576, "pageSize": 10, "timeoutSeconds": 5, "maxAffectedRows": 200 } } ] }
             """;
 
         var entry = Assert.Single(ConfigLoader.Parse("config.json", text, NoVariables).Databases);
 
-        Assert.Equal(new LimitSettings(50, 1048576, 10, 5), entry.Grants.Limits);
+        Assert.Equal(new LimitSettings(50, 1048576, 10, 5, 200), entry.Grants.Limits);
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class ConfigLoaderTests
 
         var file = ConfigLoader.Parse("config.json", text, NoVariables);
 
-        Assert.Equal(new LimitSettings(100, 1_000_000, 10, null), file.Defaults.Limits);
+        Assert.Equal(new LimitSettings(100, 1_000_000, 10, null, null), file.Defaults.Limits);
     }
 
     [Fact]
@@ -149,6 +149,18 @@ public class ConfigLoaderTests
         Assert.StartsWith("/p/config.json: $.defaults.limits.maxBytes: ", ex.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("2147483648")]
+    public void An_affected_rows_cap_out_of_range_is_a_config_error_with_its_path(string value)
+    {
+        var text = $$"""{ "databases": [ { "connectionString": "Server=a;Database=b", "limits": { "maxAffectedRows": {{value}} } } ] }""";
+
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse("/p/config.json", text, NoVariables));
+
+        Assert.StartsWith("/p/config.json: $.databases[0].limits.maxAffectedRows: ", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void A_fractional_limit_is_a_config_error_with_its_path()
     {
@@ -165,6 +177,19 @@ public class ConfigLoaderTests
         var published = File.ReadAllText(Path.Combine(RepoRoot(), "src", "SqlMcp", "schema", "config.schema.json"));
 
         Assert.Equal(published, ConfigSchema.Text);
+    }
+
+    [Fact]
+    public void The_readme_sample_config_loads()
+    {
+        var readme = File.ReadAllText(Path.Combine(RepoRoot(), "README.md"));
+        var start = readme.IndexOf("```jsonc", StringComparison.Ordinal) + "```jsonc".Length;
+        var sample = readme[start..readme.IndexOf("```", start, StringComparison.Ordinal)];
+
+        var file = ConfigLoader.Parse("config.json", sample, _ => "pw");
+
+        Assert.Equal(new LimitSettings(1000, 5242880, 100, 30, 1000), file.Defaults.Limits);
+        Assert.Equal(5000, Assert.Single(file.Databases).Grants.Limits.MaxRows);
     }
 
     private static string RepoRoot()

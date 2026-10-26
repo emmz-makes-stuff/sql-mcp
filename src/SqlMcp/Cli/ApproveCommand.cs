@@ -96,6 +96,7 @@ internal static class ApproveCommand
                 .Concat(Limit("maxBytes", was.Limits.MaxBytes, now.Limits.MaxBytes))
                 .Concat(Limit("pageSize", was.Limits.PageSize, now.Limits.PageSize))
                 .Concat(Limit("timeoutSeconds", was.Limits.TimeoutSeconds, now.Limits.TimeoutSeconds))
+                .Concat(Limit("maxAffectedRows", was.Limits.MaxAffectedRows, now.Limits.MaxAffectedRows))
                 .ToList();
             if (changes.Count > 0)
             {

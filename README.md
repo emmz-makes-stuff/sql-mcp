@@ -106,7 +106,8 @@ Both are JSON. Comments and trailing commas are allowed. A full example:
       "maxRows": 1000,        // most rows buffered per query
       "maxBytes": 5242880,    // most bytes buffered per query (5 MB; at most 1 GiB)
       "pageSize": 100,        // rows per page
-      "timeoutSeconds": 30    // command timeout
+      "timeoutSeconds": 30,   // command timeout
+      "maxAffectedRows": 1000 // most rows one write batch may affect; past it, the whole batch is rolled back
     }
   },
 

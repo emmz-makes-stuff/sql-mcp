@@ -42,6 +42,32 @@ public sealed class ToolPipelineTests : IDisposable
         Assert.Equal(5 * 1024 * 1024, db["limits"]!["max_bytes"]!.GetValue<long>());
         Assert.Equal(100, db["limits"]!["page_size"]!.GetValue<int>());
         Assert.Equal(30, db["limits"]!["timeout_seconds"]!.GetValue<int>());
+        Assert.Equal(1000, db["limits"]!["max_affected_rows"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Affected_rows_cap_is_listed()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=localhost;Database=App", "limits": { "maxAffectedRows": 50 } } ] }""");
+        using var session = _builder.Build();
+
+        var db = Assert.Single(Json(new ToolPipeline(session).ListDatabases())["databases"]!.AsArray())!;
+
+        Assert.Equal(50, db["limits"]!["max_affected_rows"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void An_ignored_affected_rows_cap_raise_is_waiting_for_approval()
+    {
+        _builder
+            .User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""")
+            .Project("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "maxAffectedRows": 5000 } } ] }""");
+        using var session = _builder.Build();
+
+        var db = Assert.Single(Json(new ToolPipeline(session).ListDatabases())["databases"]!.AsArray())!;
+
+        Assert.Equal(1000, db["limits"]!["max_affected_rows"]!.GetValue<int>());
+        Assert.Equal(ApprovalMessages.NotApproved(ApprovalMessages.Raises("maxAffectedRows")), db["not_approved"]!.GetValue<string>());
     }
 
     [Fact]

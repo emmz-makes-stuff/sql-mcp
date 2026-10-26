@@ -61,9 +61,10 @@ internal sealed record GroupInfo(string Group, string Source, string? Reason)
     public static GroupInfo From(GroupGrant grant) => new(grant.Group.ToConfigName(), grant.Source.ToDisplayName(), grant.Reason);
 }
 
-internal sealed record LimitsInfo(int MaxRows, long MaxBytes, int PageSize, int TimeoutSeconds)
+internal sealed record LimitsInfo(int MaxRows, long MaxBytes, int PageSize, int TimeoutSeconds, int MaxAffectedRows)
 {
-    public static LimitsInfo From(EffectiveLimits limits) => new(limits.MaxRows, limits.MaxBytes, limits.PageSize, limits.TimeoutSeconds);
+    public static LimitsInfo From(EffectiveLimits limits) =>
+        new(limits.MaxRows, limits.MaxBytes, limits.PageSize, limits.TimeoutSeconds, limits.MaxAffectedRows);
 }
 
 /// <summary>

@@ -2,9 +2,9 @@
 
 ## 1. Affected-rows cap in configuration
 
-- [ ] 1.1 Add `maxAffectedRows` to the schema (`integer`, 1 to 2147483647, with a description giving the default of 1000), to `LimitSettings`, `ConfigLoader.MapLimits` and `EffectiveLimits` (default 1000), and to `PermissionResolver`'s project-limit layering, where raising it is a widening (design W8). Verify with loader tests (valid value, 0, too large) and resolver tests for the "Project raises the cap" scenario
-- [ ] 1.2 Show the cap in `approve`'s diff (`maxAffectedRows 1000 → 5000`), in `config show`'s limits line, and in `list_databases`' limits. Verify with approve and `config show` command tests, and a pipeline test for the "Affected-rows cap is listed" scenario
-- [ ] 1.3 Document `maxAffectedRows` in the README's limits section and sample config. Verify the sample still loads, through the existing README sample test or a new loader test of that text
+- [x] 1.1 Add `maxAffectedRows` to the schema (`integer`, 1 to 2147483647, with a description giving the default of 1000), to `LimitSettings`, `ConfigLoader.MapLimits` and `EffectiveLimits` (default 1000), and to `PermissionResolver`'s project-limit layering, where raising it is a widening (design W8). Verify with loader tests (valid value, 0, too large) and resolver tests for the "Project raises the cap" scenario
+- [x] 1.2 Show the cap in `approve`'s diff (`maxAffectedRows 1000 → 5000`), in `config show`'s limits line, and in `list_databases`' limits. Verify with approve and `config show` command tests, and a pipeline test for the "Affected-rows cap is listed" scenario
+- [x] 1.3 Document `maxAffectedRows` in the README's limits section and sample config. Verify the sample still loads, through the existing README sample test or a new loader test of that text
 
 ## 2. Classifier: command statements
 

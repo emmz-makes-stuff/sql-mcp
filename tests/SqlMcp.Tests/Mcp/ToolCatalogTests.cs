@@ -38,6 +38,17 @@ public sealed class ToolCatalogTests : IDisposable
     }
 
     [Fact]
+    public void A_database_with_only_another_affected_rows_cap_is_not_named_in_the_query_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "maxAffectedRows": 50 } } ] }""");
+        using var session = _builder.Build();
+
+        var query = ToolCatalog.Build(session).Single(t => t.ProtocolTool.Name == ToolNames.Query).ProtocolTool;
+
+        Assert.DoesNotContain("Databases with other limits", query.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Query_tools_and_listing_are_offered_by_default()
     {
         _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");

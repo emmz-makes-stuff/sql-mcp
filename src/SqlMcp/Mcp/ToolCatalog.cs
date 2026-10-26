@@ -33,11 +33,14 @@ internal static class ToolDescriptions
     {
         var text = $"{QueryGuidance} Default caps: {Describe(EffectiveLimits.Default)}.";
         var others = databases
-            .Where(d => d.IsAllowed(ToolGroup.Query) && d.Limits != EffectiveLimits.Default)
+            .Where(d => d.IsAllowed(ToolGroup.Query) && !SameQueryCaps(d.Limits, EffectiveLimits.Default))
             .Select(d => $"{d.Identifier}: {Describe(d.Limits)}")
             .ToList();
         return others.Count == 0 ? text : $"{text} Databases with other limits: {string.Join("; ", others)}.";
     }
+
+    /// <summary>The affected-rows cap applies only to writes, so it doesn't make a query's caps differ.</summary>
+    private static bool SameQueryCaps(EffectiveLimits a, EffectiveLimits b) => a with { MaxAffectedRows = b.MaxAffectedRows } == b;
 
     public static string Describe(EffectiveLimits limits) => string.Create(
         CultureInfo.InvariantCulture,

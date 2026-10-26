@@ -192,7 +192,8 @@ internal static class ConfigLoader
         element.TryGetProperty("maxRows", out var rows) ? (int)WholeNumber(rows) : null,
         element.TryGetProperty("maxBytes", out var bytes) ? WholeNumber(bytes) : null,
         element.TryGetProperty("pageSize", out var page) ? (int)WholeNumber(page) : null,
-        element.TryGetProperty("timeoutSeconds", out var timeout) ? (int)WholeNumber(timeout) : null);
+        element.TryGetProperty("timeoutSeconds", out var timeout) ? (int)WholeNumber(timeout) : null,
+        element.TryGetProperty("maxAffectedRows", out var affected) ? (int)WholeNumber(affected) : null);
 
     /// <summary>
     /// A limit the schema has already checked is an integer in range. JSON Schema counts <c>100.0</c> and <c>1e3</c>

@@ -72,10 +72,10 @@ public class PermissionResolverTests
     {
         var db = Single(User("""
             { "defaults": { "limits": { "maxRows": 500, "timeoutSeconds": 10 } },
-              "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "pageSize": 20, "timeoutSeconds": 60 } } ] }
+              "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "pageSize": 20, "timeoutSeconds": 60, "maxAffectedRows": 50 } } ] }
             """));
 
-        Assert.Equal(new EffectiveLimits(500, EffectiveLimits.Default.MaxBytes, 20, 60), db.Limits);
+        Assert.Equal(new EffectiveLimits(500, EffectiveLimits.Default.MaxBytes, 20, 60, 50), db.Limits);
     }
 
     [Fact]
@@ -229,6 +229,34 @@ public class PermissionResolverTests
         Assert.Equal(EffectiveLimits.Default.TimeoutSeconds, unapproved.Limits.TimeoutSeconds);
         Assert.Equal(["raises timeoutSeconds"], unapproved.UnapprovedWidenings);
         Assert.Equal(300, approved.Limits.TimeoutSeconds);
+    }
+
+    [Fact]
+    public void Project_raises_the_affected_rows_cap_only_when_approved()
+    {
+        const string project = """
+            { "databases": [ { "connectionString": "Server=localhost;Database=App", "limits": { "maxAffectedRows": 5000 } } ] }
+            """;
+
+        var unapproved = Single(null, Project(project), approved: false);
+        var approved = Single(null, Project(project), approved: true);
+
+        Assert.Equal(EffectiveLimits.Default.MaxAffectedRows, unapproved.Limits.MaxAffectedRows);
+        Assert.Equal(["raises maxAffectedRows"], unapproved.UnapprovedWidenings);
+        Assert.Equal(5000, approved.Limits.MaxAffectedRows);
+        Assert.Empty(approved.UnapprovedWidenings);
+    }
+
+    [Fact]
+    public void Project_lowers_the_affected_rows_cap_without_approval()
+    {
+        var db = Single(
+            User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "limits": { "maxAffectedRows": 500 } } ] }"""),
+            Project("""{ "defaults": { "limits": { "maxAffectedRows": 10 } } }"""),
+            approved: false);
+
+        Assert.Equal(10, db.Limits.MaxAffectedRows);
+        Assert.Empty(db.UnapprovedWidenings);
     }
 
     [Fact]
