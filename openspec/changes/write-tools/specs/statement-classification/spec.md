@@ -57,7 +57,7 @@ An UPDATE or DELETE statement without a `WHERE` clause SHALL be rejected, with a
 - **THEN** it is classified as command
 
 ### Requirement: DDL covers declarative objects only
-A `ddl` statement SHALL be accepted only when it creates, alters or drops a table, column, constraint, index, view, schema or sequence, or truncates a table. A view's SELECT SHALL itself be acceptable as a query. Procedures, functions, triggers, and database- or security-level objects SHALL be rejected.
+A `ddl` statement SHALL be accepted only when it creates, alters or drops a table, column, constraint, index, view, schema or sequence, or truncates a table. A view's SELECT SHALL itself be acceptable as a query. `ALTER SCHEMA … TRANSFER` SHALL be rejected, because moving an object between schemas can change who may use it. Procedures, functions, triggers, and database- or security-level objects SHALL be rejected.
 
 #### Scenario: Index and view
 - **WHEN** the classifier is given `CREATE INDEX ix_orders_customer ON dbo.orders (customer_id)` and `CREATE VIEW dbo.open_orders AS SELECT id FROM dbo.orders WHERE closed = 0`

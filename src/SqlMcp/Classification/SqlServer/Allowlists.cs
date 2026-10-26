@@ -20,9 +20,80 @@ internal static class Allowlists
         [typeof(CreateTableStatement)] = StatementCategory.Ddl,
         [typeof(DropTableStatement)] = StatementCategory.Ddl,
         [typeof(AlterTableAddTableElementStatement)] = StatementCategory.Ddl,
+        [typeof(AlterTableAlterColumnStatement)] = StatementCategory.Ddl,
+        [typeof(AlterTableDropTableElementStatement)] = StatementCategory.Ddl,
+        [typeof(AlterTableConstraintModificationStatement)] = StatementCategory.Ddl,
         [typeof(TruncateTableStatement)] = StatementCategory.Ddl,
+        [typeof(CreateIndexStatement)] = StatementCategory.Ddl,
+        [typeof(AlterIndexStatement)] = StatementCategory.Ddl,
+        [typeof(DropIndexStatement)] = StatementCategory.Ddl,
+        [typeof(CreateViewStatement)] = StatementCategory.Ddl,
+        [typeof(AlterViewStatement)] = StatementCategory.Ddl,
+        [typeof(CreateOrAlterViewStatement)] = StatementCategory.Ddl,
+        [typeof(DropViewStatement)] = StatementCategory.Ddl,
+        [typeof(CreateSchemaStatement)] = StatementCategory.Ddl,
+        [typeof(DropSchemaStatement)] = StatementCategory.Ddl,
+        [typeof(CreateSequenceStatement)] = StatementCategory.Ddl,
+        [typeof(AlterSequenceStatement)] = StatementCategory.Ddl,
+        [typeof(DropSequenceStatement)] = StatementCategory.Ddl,
         [typeof(ExecuteStatement)] = StatementCategory.Execute,
     };
+
+    /// <summary>
+    /// Names, literals, scalar expressions and predicates: what a query's expressions use, and what a DDL default,
+    /// CHECK constraint or computed column may use (design W5). Subqueries are not here.
+    /// </summary>
+    private static readonly HashSet<Type> Scalars =
+    [
+        // Names
+        typeof(Identifier),
+        typeof(MultiPartIdentifier),
+        typeof(SchemaObjectName),
+        typeof(IdentifierOrValueExpression),
+        typeof(SqlDataTypeReference),
+
+        // Literals
+        typeof(IntegerLiteral),
+        typeof(NumericLiteral),
+        typeof(RealLiteral),
+        typeof(MoneyLiteral),
+        typeof(StringLiteral),
+        typeof(BinaryLiteral),
+        typeof(NullLiteral),
+        typeof(IdentifierLiteral),
+
+        // Scalar expressions. Functions can't write; CLR and extended-procedure side effects are the gap that
+        // ADR-0002 accepts.
+        typeof(ColumnReferenceExpression),
+        typeof(BinaryExpression),
+        typeof(UnaryExpression),
+        typeof(ParenthesisExpression),
+        typeof(FunctionCall),
+        typeof(MultiPartIdentifierCallTarget),
+        typeof(ParameterlessCall),
+        typeof(CastCall),
+        typeof(ConvertCall),
+        typeof(TryCastCall),
+        typeof(TryConvertCall),
+        typeof(IIfCall),
+        typeof(CoalesceExpression),
+        typeof(NullIfExpression),
+        typeof(SearchedCaseExpression),
+        typeof(SearchedWhenClause),
+        typeof(SimpleCaseExpression),
+        typeof(SimpleWhenClause),
+
+        // Predicates
+        typeof(BooleanComparisonExpression),
+        typeof(BooleanBinaryExpression),
+        typeof(BooleanParenthesisExpression),
+        typeof(BooleanIsNullExpression),
+        typeof(BooleanTernaryExpression),
+        typeof(InPredicate),
+        typeof(LikePredicate),
+        typeof(ExistsPredicate),
+        typeof(SubqueryComparisonPredicate),
+    ];
 
     private static readonly HashSet<Type> Query =
     [
@@ -89,55 +160,8 @@ internal static class Allowlists
         typeof(LiteralOptimizerHint),
         typeof(OptimizeForOptimizerHint),
 
-        // Names
-        typeof(Identifier),
-        typeof(MultiPartIdentifier),
-        typeof(SchemaObjectName),
-        typeof(IdentifierOrValueExpression),
-        typeof(SqlDataTypeReference),
-
-        // Literals
-        typeof(IntegerLiteral),
-        typeof(NumericLiteral),
-        typeof(RealLiteral),
-        typeof(MoneyLiteral),
-        typeof(StringLiteral),
-        typeof(BinaryLiteral),
-        typeof(NullLiteral),
-        typeof(IdentifierLiteral),
-
-        // Scalar expressions. Functions can't write; CLR and extended-procedure side effects are the gap that
-        // ADR-0002 accepts.
-        typeof(ColumnReferenceExpression),
-        typeof(BinaryExpression),
-        typeof(UnaryExpression),
-        typeof(ParenthesisExpression),
-        typeof(FunctionCall),
-        typeof(MultiPartIdentifierCallTarget),
-        typeof(ParameterlessCall),
-        typeof(CastCall),
-        typeof(ConvertCall),
-        typeof(TryCastCall),
-        typeof(TryConvertCall),
-        typeof(IIfCall),
-        typeof(CoalesceExpression),
-        typeof(NullIfExpression),
-        typeof(SearchedCaseExpression),
-        typeof(SearchedWhenClause),
-        typeof(SimpleCaseExpression),
-        typeof(SimpleWhenClause),
+        .. Scalars,
         typeof(ScalarSubquery),
-
-        // Predicates
-        typeof(BooleanComparisonExpression),
-        typeof(BooleanBinaryExpression),
-        typeof(BooleanParenthesisExpression),
-        typeof(BooleanIsNullExpression),
-        typeof(BooleanTernaryExpression),
-        typeof(InPredicate),
-        typeof(LikePredicate),
-        typeof(ExistsPredicate),
-        typeof(SubqueryComparisonPredicate),
     ];
 
     /// <summary>
@@ -168,21 +192,62 @@ internal static class Allowlists
         typeof(NextValueForExpression),
     ];
 
+    /// <summary>
+    /// Declarative objects only (design W5): tables, columns, constraints, indexes, views, schemas and sequences.
+    /// Defaults, CHECK constraints and computed columns use the scalar expressions. A view's SELECT is walked under
+    /// the query category, so the query list is not needed here.
+    /// </summary>
     private static readonly HashSet<Type> Ddl =
     [
+        .. Scalars,
+
+        // Tables, columns and constraints
         typeof(CreateTableStatement),
         typeof(TableDefinition),
         typeof(ColumnDefinition),
         typeof(NullableConstraintDefinition),
         typeof(UniqueConstraintDefinition),
+        typeof(DefaultConstraintDefinition),
+        typeof(CheckConstraintDefinition),
+        typeof(ForeignKeyConstraintDefinition),
+        typeof(IdentityOptions),
+        typeof(ColumnWithSortOrder),
         typeof(DropTableStatement),
         typeof(AlterTableAddTableElementStatement),
+        typeof(AlterTableAlterColumnStatement),
+        typeof(AlterTableDropTableElementStatement),
+        typeof(AlterTableDropTableElement),
+        typeof(AlterTableConstraintModificationStatement),
         typeof(TruncateTableStatement),
 
-        typeof(Identifier),
-        typeof(SchemaObjectName),
-        typeof(SqlDataTypeReference),
-        typeof(IntegerLiteral),
+        // Indexes
+        typeof(CreateIndexStatement),
+        typeof(AlterIndexStatement),
+        typeof(DropIndexStatement),
+        typeof(DropIndexClause),
+        typeof(IndexDefinition),
+
+        // Views: the SELECT itself is checked as a query.
+        typeof(CreateViewStatement),
+        typeof(AlterViewStatement),
+        typeof(CreateOrAlterViewStatement),
+        typeof(DropViewStatement),
+        typeof(ViewOption),
+
+        // Schemas: CREATE SCHEMA only without elements or AUTHORIZATION (SideEffectChecks).
+        typeof(CreateSchemaStatement),
+        typeof(DropSchemaStatement),
+        typeof(StatementList),
+
+        // Sequences
+        typeof(CreateSequenceStatement),
+        typeof(AlterSequenceStatement),
+        typeof(DropSequenceStatement),
+        typeof(DataTypeSequenceOption),
+        typeof(ScalarExpressionSequenceOption),
+
+        // A sequence-backed default (DEFAULT NEXT VALUE FOR s) advances the sequence only when a row is inserted.
+        typeof(NextValueForExpression),
     ];
 
     private static readonly HashSet<Type> Execute =
@@ -194,13 +259,22 @@ internal static class Allowlists
         typeof(ProcedureReference),
         typeof(ExecuteParameter),
 
-        // A parameter name (@a = 1). EXEC of a procedure *named* by a variable is rejected in SideEffectChecks.
+        // A parameter name (@a = 1). EXEC of a procedure *named* by a variable, and a variable as a parameter's
+        // value, are rejected in SideEffectChecks.
         typeof(VariableReference),
 
         typeof(Identifier),
         typeof(SchemaObjectName),
+
+        // Parameter values: literals, NULL, and negated numbers (SideEffectChecks keeps UnaryExpression to those).
         typeof(IntegerLiteral),
+        typeof(NumericLiteral),
+        typeof(RealLiteral),
+        typeof(MoneyLiteral),
         typeof(StringLiteral),
+        typeof(BinaryLiteral),
+        typeof(NullLiteral),
+        typeof(UnaryExpression),
     ];
 
     public static IReadOnlySet<Type> For(StatementCategory category) => category switch

@@ -48,10 +48,14 @@ internal static class SideEffectChecks
             $"{Phrases.For(node)} {At(node)} reaches outside the database, so no tool runs it",
         UpdateStatement { UpdateSpecification: { WhereClause: null } update } statement
             when !TargetsCte(update.Target, statement.WithCtesAndXmlNamespaces) =>
-            $"UPDATE needs a WHERE clause {At(node)}",
+            $"UPDATE needs a WHERE clause that picks the rows to change ({At(node)})",
         DeleteStatement { DeleteSpecification: { WhereClause: null } delete } statement
             when !TargetsCte(delete.Target, statement.WithCtesAndXmlNamespaces) =>
-            $"DELETE needs a WHERE clause {At(node)}",
+            $"DELETE needs a WHERE clause that picks the rows to change ({At(node)})",
+        CreateSchemaStatement { Owner: not null } =>
+            $"CREATE SCHEMA ... AUTHORIZATION {At(node)} sets the schema's owner, which is a security change",
+        CreateSchemaStatement { StatementList.Statements.Count: > 0 } =>
+            $"CREATE SCHEMA with objects in it {At(node)} is not supported: create the schema, then each object in its own statement",
         SchemaObjectName name when IsWrite(category) && (name.DatabaseIdentifier is not null || name.ServerIdentifier is not null) =>
             $"{OtherDatabase} {Dotted(name.Identifiers)} {At(node)} has a database or server part",
         ColumnReferenceExpression { MultiPartIdentifier.Count: >= 4 } column when IsWrite(category) =>
@@ -70,6 +74,12 @@ internal static class SideEffectChecks
             $"EXEC through OPENDATASOURCE {At(node)} runs elsewhere, so it can't be classified",
         ExecutableProcedureReference reference when IsSpExecuteSql(reference) =>
             $"sp_executesql {At(node)} runs dynamic SQL, which can't be classified",
+        ExecutableProcedureReference { ProcedureReference.ProcedureReference.Name: { } procedure } when IsSystemProcedure(procedure) =>
+            $"system and extended procedures can't be run: {Dotted(procedure.Identifiers)} {At(node)}",
+        ExecuteSpecification { Variable: not null } =>
+            $"assigning EXEC's return value to a @variable {At(node)} is not supported",
+        ExecuteParameter { ParameterValue: { } value } when !IsPlainValue(value) =>
+            $"a procedure parameter {At(node)} must be a literal, NULL or a negative number",
         _ => null,
     };
 
@@ -87,6 +97,16 @@ internal static class SideEffectChecks
         && with is not null
         && with.CommonTableExpressions.Any(cte =>
             string.Equals(cte.ExpressionName.Value, name.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The <c>sys</c> schema, or a name starting <c>sp_</c> or <c>xp_</c>, ignoring case (design W5).</summary>
+    private static bool IsSystemProcedure(SchemaObjectName procedure) =>
+        string.Equals(procedure.SchemaIdentifier?.Value, "sys", StringComparison.OrdinalIgnoreCase)
+        || procedure.BaseIdentifier.Value.StartsWith("sp_", StringComparison.OrdinalIgnoreCase)
+        || procedure.BaseIdentifier.Value.StartsWith("xp_", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A literal (including NULL), or a negated number such as <c>-5</c>.</summary>
+    private static bool IsPlainValue(ScalarExpression value) => value is Literal
+        or UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative, Expression: IntegerLiteral or NumericLiteral or RealLiteral or MoneyLiteral };
 
     private static string Dotted(IEnumerable<Identifier> identifiers) => string.Join(".", identifiers.Select(i => i.Value));
 

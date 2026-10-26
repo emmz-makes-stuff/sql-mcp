@@ -73,6 +73,50 @@ internal static class ClassifierTable
         { "EXEC dbo.p 1, 'x'", Execute },
         { "EXEC dbo.p @a = 1, @b = N'x'", Execute },
 
+        // DDL (write-tools §3): spec scenarios.
+        { "CREATE INDEX ix_orders_customer ON dbo.orders (customer_id)", Ddl },
+        { "CREATE VIEW dbo.open_orders AS SELECT id FROM dbo.orders WHERE closed = 0", Ddl },
+
+        // Tables, with defaults, CHECK constraints, computed columns and keys.
+        { "CREATE TABLE dbo.orders (id int IDENTITY(1, 1) NOT NULL CONSTRAINT pk_orders PRIMARY KEY, customer_id int NOT NULL REFERENCES dbo.customers (id), qty int NOT NULL CONSTRAINT ck_orders_qty CHECK (qty > 0), price decimal(10, 2) NOT NULL DEFAULT (0), total AS (qty * price) PERSISTED, created datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(), CONSTRAINT uq_orders UNIQUE (customer_id, created))", Ddl },
+        { "CREATE TABLE dbo.t (id bigint NOT NULL CONSTRAINT df_t_id DEFAULT (NEXT VALUE FOR dbo.seq), a int NULL, INDEX ix_t_a (a))", Ddl },
+
+        // The ALTER TABLE forms.
+        { "ALTER TABLE dbo.t ADD CONSTRAINT df_t_c DEFAULT (0) FOR c", Ddl },
+        { "ALTER TABLE dbo.t ADD CONSTRAINT ck_t_c CHECK (c >= 0 AND c < 100)", Ddl },
+        { "ALTER TABLE dbo.t ADD CONSTRAINT fk_t_u FOREIGN KEY (u_id) REFERENCES dbo.u (id) ON DELETE CASCADE", Ddl },
+        { "ALTER TABLE dbo.t ADD total AS (qty * price)", Ddl },
+        { "ALTER TABLE dbo.t ALTER COLUMN c bigint NOT NULL", Ddl },
+        { "ALTER TABLE dbo.t DROP COLUMN c", Ddl },
+        { "ALTER TABLE dbo.t DROP CONSTRAINT IF EXISTS ck_t_c", Ddl },
+        { "ALTER TABLE dbo.t NOCHECK CONSTRAINT fk_t_u", Ddl },
+        { "ALTER TABLE dbo.t WITH CHECK CHECK CONSTRAINT fk_t_u", Ddl },
+
+        // Indexes.
+        { "CREATE UNIQUE NONCLUSTERED INDEX ix_t_ab ON dbo.t (a ASC, b DESC) INCLUDE (c) WHERE c IS NOT NULL", Ddl },
+        { "ALTER INDEX ix_t_ab ON dbo.t REBUILD", Ddl },
+        { "ALTER INDEX ix_t_ab ON dbo.t DISABLE", Ddl },
+        { "ALTER INDEX ix_t_ab ON dbo.t REORGANIZE", Ddl },
+        { "DROP INDEX ix_t_ab ON dbo.t", Ddl },
+        { "DROP INDEX IF EXISTS ix_t_ab ON dbo.t", Ddl },
+
+        // Views.
+        { "CREATE OR ALTER VIEW dbo.v AS SELECT a, COUNT(*) AS n FROM dbo.t GROUP BY a", Ddl },
+        { "ALTER VIEW dbo.v WITH SCHEMABINDING AS SELECT a FROM dbo.t", Ddl },
+        { "DROP VIEW IF EXISTS dbo.v", Ddl },
+
+        // Schemas and sequences.
+        { "CREATE SCHEMA reporting", Ddl },
+        { "DROP SCHEMA IF EXISTS reporting", Ddl },
+        { "CREATE SEQUENCE dbo.seq AS bigint START WITH 1 INCREMENT BY 1", Ddl },
+        { "ALTER SEQUENCE dbo.seq RESTART WITH 100", Ddl },
+        { "DROP SEQUENCE dbo.seq", Ddl },
+
+        // Execute (write-tools §3): user procedures with plain values.
+        { "EXEC dbo.archive_orders @before = '2026-01-01', @limit = 500", Execute },
+        { "EXEC dbo.p NULL, -5, 1.5, N'x', 0x1F", Execute },
+        { "EXEC reporting.refresh @days = -7, @scale = 2.5E0, @cost = $10", Execute },
+
         // Query corpus (task 4.6): basics.
         { "SELECT * FROM t", Query },
         { "SELECT a, b AS bee, t.c FROM dbo.t AS t WHERE a > 1 AND (b < 2 OR c IS NULL) ORDER BY a DESC", Query },
@@ -166,7 +210,7 @@ internal static class ClassifierTable
         { "DECLARE @x int", "DECLARE" },
         { "BEGIN TRANSACTION", "BEGIN TRANSACTION" },
         { "WAITFOR DELAY '00:00:01'", "WAITFOR" },
-        { "CREATE PROCEDURE p AS SELECT 1", "CreateProcedureStatement" },
+        { "CREATE PROCEDURE p AS SELECT 1", "procedures, functions and triggers can't be created through sql-mcp" },
 
         // Spec: side-effecting reads.
         { "SELECT * INTO t2 FROM t", "creates a table" },
@@ -200,10 +244,10 @@ internal static class ClassifierTable
         { "INSERT INTO t (a) SELECT BulkColumn FROM OPENROWSET(BULK 'c:\\x.csv', SINGLE_CLOB) AS b", "OPENROWSET" },
 
         // UPDATE and DELETE need a WHERE clause.
-        { "DELETE FROM dbo.users", "DELETE needs a WHERE clause" },
-        { "UPDATE dbo.users SET active = 0", "UPDATE needs a WHERE clause" },
-        { "UPDATE o SET status = 'x' FROM dbo.orders o JOIN dbo.customers c ON c.id = o.customer_id", "UPDATE needs a WHERE clause" },
-        { "WITH x AS (SELECT 1 AS a) DELETE FROM dbo.t", "DELETE needs a WHERE clause" },
+        { "DELETE FROM dbo.users", "DELETE needs a WHERE clause that picks the rows to change" },
+        { "UPDATE dbo.users SET active = 0", "UPDATE needs a WHERE clause that picks the rows to change" },
+        { "UPDATE o SET status = 'x' FROM dbo.orders o JOIN dbo.customers c ON c.id = o.customer_id", "UPDATE needs a WHERE clause that picks the rows to change" },
+        { "WITH x AS (SELECT 1 AS a) DELETE FROM dbo.t", "DELETE needs a WHERE clause that picks the rows to change" },
 
         // Writes stay in the target database.
         { "INSERT INTO sales.dbo.orders (id) VALUES (1)", "writes may only name objects in the target database" },
@@ -219,6 +263,57 @@ internal static class ClassifierTable
         { "INSERT INTO t EXEC dbo.p", "ExecuteInsertSource" },
         { "UPDATE t SET a = 1 WHERE CURRENT OF c", "CursorId" },
         { "DELETE FROM t OUTPUT deleted.id INTO @ids WHERE id = 1", "VariableTableReference" },
+
+        // A view's SELECT is checked as a query.
+        { "CREATE VIEW dbo.v AS SELECT * FROM dbo.t WITH (UPDLOCK)", "the view's SELECT is not a valid query" },
+        { "CREATE VIEW dbo.v AS SELECT a FROM dbo.t WITH (UPDLOCK)", "UPDLOCK" },
+        { "CREATE VIEW dbo.v AS SELECT * FROM OPENQUERY(lnk, 'SELECT 1')", "OPENQUERY" },
+        { "CREATE TABLE otherdb.dbo.t (a int)", "writes may only name objects in the target database" },
+
+        // ALTER INDEX takes no WITH options.
+        { "ALTER INDEX ix_t_ab ON dbo.t REBUILD WITH (ONLINE = ON)", "not allowed in ddl statements" },
+
+        // Schemas: no owner, no elements.
+        { "CREATE SCHEMA reporting AUTHORIZATION bob", "security change" },
+        { "CREATE SCHEMA reporting CREATE TABLE t (a int)", "each object in its own statement" },
+        { "ALTER SCHEMA reporting TRANSFER dbo.t", "AlterSchemaStatement" },
+
+        // Defaults and CHECK constraints use scalar expressions only.
+        { "ALTER TABLE dbo.t ADD CONSTRAINT df_t_c DEFAULT (@x) FOR c", "a @variable" },
+
+        // Spec: programmable objects are refused, because their bodies are not inspected.
+        { "CREATE PROCEDURE dbo.p AS EXEC('DROP TABLE t')", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "CREATE OR ALTER PROCEDURE dbo.p AS SELECT 1", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "ALTER PROCEDURE dbo.p AS SELECT 1", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "CREATE FUNCTION dbo.f() RETURNS int AS BEGIN RETURN 1 END", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "CREATE OR ALTER FUNCTION dbo.f() RETURNS TABLE AS RETURN SELECT 1 AS a", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "ALTER FUNCTION dbo.f() RETURNS int AS BEGIN RETURN 2 END", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "CREATE TRIGGER dbo.tr ON dbo.t AFTER INSERT AS DELETE FROM dbo.t", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "CREATE OR ALTER TRIGGER dbo.tr ON dbo.t AFTER INSERT AS SELECT 1", "procedures, functions and triggers can't be created through sql-mcp" },
+        { "ALTER TRIGGER dbo.tr ON dbo.t AFTER INSERT AS SELECT 1", "procedures, functions and triggers can't be created through sql-mcp" },
+
+        // Spec: database- and security-level DDL.
+        { "CREATE USER bob WITHOUT LOGIN", "CreateUserStatement" },
+        { "CREATE DATABASE other", "CreateDatabaseStatement" },
+        { "ALTER DATABASE CURRENT SET RECOVERY SIMPLE", "AlterDatabase" },
+        { "CREATE LOGIN bob WITH PASSWORD = 'x'", "CreateLoginStatement" },
+        { "CREATE ROLE readers", "CreateRoleStatement" },
+        { "ALTER ROLE db_owner ADD MEMBER bob", "AlterRoleStatement" },
+        { "ALTER AUTHORIZATION ON SCHEMA::reporting TO bob", "AlterAuthorizationStatement" },
+        { "DROP PROCEDURE dbo.p", "DropProcedureStatement" },
+
+        // Spec: system and extended procedures.
+        { "EXEC sp_addrolemember 'db_owner', 'bob'", "system and extended procedures can't be run" },
+        { "EXEC sys.sp_configure", "system and extended procedures can't be run" },
+        { "EXEC xp_cmdshell 'dir'", "system and extended procedures can't be run" },
+        { "EXEC SP_WHO", "system and extended procedures can't be run" },
+        { "EXEC dbo.sp_mine", "system and extended procedures can't be run" },
+        { "EXEC sys.p", "system and extended procedures can't be run" },
+
+        // Execute parameters: literals, NULL and negated numbers only.
+        { "EXEC dbo.p @x", "must be a literal, NULL or a negative number" },
+        { "EXEC dbo.p @a = @x", "must be a literal, NULL or a negative number" },
+        { "EXEC @rc = dbo.p", "return value" },
 
         // Spec: unrecognised syntax names the element.
         { "SELECT @x = 1", "assigning to a @variable" },

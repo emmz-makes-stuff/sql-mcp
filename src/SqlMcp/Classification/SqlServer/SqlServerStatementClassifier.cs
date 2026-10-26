@@ -45,7 +45,7 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
     {
         if (!Allowlists.StatementCategories.TryGetValue(statement.GetType(), out var category))
         {
-            return Rejected(number, statement, $"{Phrases.For(statement)} is not supported by any tool");
+            return Rejected(number, statement, Phrases.Unsupported(statement));
         }
 
         var visitor = new AllowlistVisitor(category);
@@ -77,6 +77,26 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
             if (Rejection is null && !Allowlists.For(category).Contains(node.GetType()))
             {
                 Rejection = $"{Phrases.For(node)} {SideEffectChecks.At(node)} is not allowed in {category.ToName()} statements";
+            }
+        }
+
+        /// <summary>
+        /// A view's SELECT is checked as a query (design W5), so a view can't hide what a query couldn't do. In DDL a
+        /// SELECT statement only appears as a view's body.
+        /// </summary>
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            if (category != StatementCategory.Ddl)
+            {
+                base.ExplicitVisit(node);
+                return;
+            }
+
+            if (Rejection is null)
+            {
+                var query = new AllowlistVisitor(StatementCategory.Query);
+                node.Accept(query);
+                Rejection = query.Rejection is { } reason ? $"the view's SELECT is not a valid query: {reason}" : null;
             }
         }
     }

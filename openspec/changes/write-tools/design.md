@@ -98,7 +98,11 @@ Motivation is in proposal.md. The behaviour is in the four delta specs.
   - defaults, `CHECK` constraints and computed columns reuse the query's scalar-expression allowlist;
   - a view's `SelectStatement` is walked under the query category, so a view can't hide what a query couldn't do;
   - `CREATE SCHEMA` is accepted only without schema elements and without `AUTHORIZATION`, because ownership is a
-    security change.
+    security change. `ALTER SCHEMA … TRANSFER` is rejected for the same reason: through ownership chaining, the
+    move can change who may use the object (2026-10-26).
+  - Defaults may use `NEXT VALUE FOR`, which a default advances only on insert. `ALTER TABLE … [NO]CHECK
+    CONSTRAINT` and `ALTER INDEX … REBUILD | REORGANIZE | DISABLE` (with no `WITH` options) are accepted
+    (2026-10-26).
   - `CreateProcedureStatement`, `CreateFunctionStatement`, `CreateTriggerStatement` and their `ALTER`/`CREATE OR
     ALTER` forms get a dedicated reason through `Phrases`. Without it they would fall through as generic
     unrecognised syntax.

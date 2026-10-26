@@ -29,6 +29,27 @@ internal static class Phrases
         [typeof(SelectSetVariable)] = "assigning to a @variable in SELECT",
     };
 
+    private const string Programmable =
+        "procedures, functions and triggers can't be created through sql-mcp: their bodies run later, unseen by the classifier";
+
+    /// <summary>Statements whose refusal needs its own reason rather than "… is not supported by any tool".</summary>
+    private static readonly Dictionary<Type, string> Refusals = new()
+    {
+        [typeof(CreateProcedureStatement)] = $"CREATE PROCEDURE: {Programmable}",
+        [typeof(AlterProcedureStatement)] = $"ALTER PROCEDURE: {Programmable}",
+        [typeof(CreateOrAlterProcedureStatement)] = $"CREATE OR ALTER PROCEDURE: {Programmable}",
+        [typeof(CreateFunctionStatement)] = $"CREATE FUNCTION: {Programmable}",
+        [typeof(AlterFunctionStatement)] = $"ALTER FUNCTION: {Programmable}",
+        [typeof(CreateOrAlterFunctionStatement)] = $"CREATE OR ALTER FUNCTION: {Programmable}",
+        [typeof(CreateTriggerStatement)] = $"CREATE TRIGGER: {Programmable}",
+        [typeof(AlterTriggerStatement)] = $"ALTER TRIGGER: {Programmable}",
+        [typeof(CreateOrAlterTriggerStatement)] = $"CREATE OR ALTER TRIGGER: {Programmable}",
+    };
+
+    /// <summary>Why a statement no tool runs is refused.</summary>
+    public static string Unsupported(TSqlStatement statement) =>
+        Refusals.TryGetValue(statement.GetType(), out var reason) ? reason : $"{For(statement)} is not supported by any tool";
+
     /// <summary>E.g. "GRANT", or "create procedure statement (CreateProcedureStatement)" when no phrase is known.</summary>
     public static string For(TSqlFragment node) => For(node.GetType());
 
