@@ -33,6 +33,9 @@ internal enum FailureKind
     Sql,
     Timeout,
     Connection,
+
+    /// <summary>A write passed the database's affected-rows cap and was rolled back (design W4).</summary>
+    AffectedRowsCap,
     Other,
 }
 

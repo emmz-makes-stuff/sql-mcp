@@ -33,7 +33,7 @@ Each write tool call SHALL run in one transaction. The transaction SHALL be comm
 - **THEN** it is cancelled and rolled back, and the error says it timed out and that nothing was changed
 
 ### Requirement: Affected-rows cap
-Each database SHALL have an affected-rows cap, `maxAffectedRows` (default 1000), configured and layered like the other limits. A write batch whose statements together affect more rows than the cap SHALL be rolled back, and the agent SHALL be told the cap and to narrow the change.
+Each database SHALL have an affected-rows cap, `maxAffectedRows` (default 1000), configured and layered like the other limits. A write batch whose statements together affect more rows than the cap SHALL be rolled back, and the agent SHALL be told the cap and to narrow the change. Every row count the server reports SHALL count towards the cap, including the rows a procedure's `SELECT` returns.
 
 #### Scenario: Over the cap
 - **WHEN** the cap is 1000 and an agent calls `command` with an `UPDATE` whose `WHERE` matches 5000 rows
@@ -42,6 +42,10 @@ Each database SHALL have an affected-rows cap, `maxAffectedRows` (default 1000),
 #### Scenario: Within the cap
 - **WHEN** the cap is 1000 and a `command` batch affects 999 rows in total
 - **THEN** it is committed
+
+#### Scenario: A procedure's SELECT counts
+- **WHEN** the cap is 1000 and an agent calls `execute` on a procedure that updates 600 rows and then selects them
+- **THEN** the batch is rolled back, because the update and the select together report 1200 rows
 
 #### Scenario: Project raises the cap
 - **WHEN** the project file raises `maxAffectedRows` and has not been approved

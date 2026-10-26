@@ -281,6 +281,7 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
         var outcome = await _executor.ExecuteAsync(
             "Server=tcp:127.0.0.1,1;Connect Timeout=2;User ID=sa;Password=x;TrustServerCertificate=true",
             "SELECT 1",
+            BatchMode.ReadOnly,
             EffectiveLimits.Default,
             Cancel);
 
@@ -303,7 +304,7 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
 
         try
         {
-            await _executor.ExecuteAsync(db.ConnectionString, sql, limits, cancellation.Token);
+            await _executor.ExecuteAsync(db.ConnectionString, sql, BatchMode.ReadOnly, limits, cancellation.Token);
         }
         catch (OperationCanceledException)
         {
@@ -314,5 +315,5 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
     }
 
     private Task<QueryOutcome> Run(string sql, EffectiveLimits? limits = null) =>
-        _executor.ExecuteAsync(db.ConnectionString, sql, limits ?? EffectiveLimits.Default, Cancel);
+        _executor.ExecuteAsync(db.ConnectionString, sql, BatchMode.ReadOnly, limits ?? EffectiveLimits.Default, Cancel);
 }

@@ -74,6 +74,15 @@ Motivation is in proposal.md. The behaviour is in the four delta specs.
   run. It then rolls back and returns `QueryFailed` with the new `FailureKind.AffectedRowsCap`.
 - The failure message gives the cap and the total, and says to narrow the `WHERE` clause or split the change.
 - `TRUNCATE` reports no count, so it never trips the cap. It is DDL, granted separately.
+- A row count arrives only when the server flushes its output: a full packet, or the end of the batch. A batch with
+  little output has usually run in full by then, so the cancel stops later statements only when the output was
+  flushed early (a large result, or a procedure's `RAISERROR … WITH NOWAIT`). The rollback undoes it either way.
+  The cancel is sent from inside the `StatementCompleted` handler: from another thread it waits until the batch
+  ends (2026-10-26 §5).
+- A `SELECT` reports its count just like a change does, and SqlClient doesn't say which kind of statement a count
+  came from. So in `execute`, rows a procedure's `SELECT` returns count in `RowsAffected` and towards the cap
+  (Emmz's ruling, 2026-10-26). This errs on the strict side. In `command`, the only result sets come from
+  `OUTPUT`, whose count is the change's own.
 - *Rejected:*
   - `SET ROWCOUNT`, which silently does part of the change;
   - counting with a dry run first, which doubles the cost and races with other writers.
@@ -145,7 +154,7 @@ Motivation is in proposal.md. The behaviour is in the four delta specs.
 
 - **[A `NOCOUNT ON` procedure hides its row counts, so the cap can't see them]** → Accepted. An `execute` grant
   trusts the database's procedures, as ADR-0002 already trusts what a procedure does. The `execute` description
-  says the cap counts only rows the server reports.
+  says the cap counts every row count the server reports, including rows a procedure's `SELECT` returns.
 - **[The cap prevents permanent damage, not disruption]**
   - SQL Server reports a statement's row count only once the statement completes, so a mistaken 10-million-row
     `DELETE` runs in full before the cap can roll it back.

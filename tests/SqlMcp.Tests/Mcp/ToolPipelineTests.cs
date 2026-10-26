@@ -265,6 +265,7 @@ public sealed class ToolPipelineTests : IDisposable
         var first = Json(await pipeline.QueryAsync(Sales, "SELECT id, name FROM dbo.users", Cancel));
 
         Assert.Equal(["SELECT id, name FROM dbo.users"], _builder.Executor.Calls);
+        Assert.Equal([BatchMode.ReadOnly], _builder.Executor.Modes);
         Assert.Equal(250, first["rows_buffered"]!.GetValue<int>());
         Assert.False(first["truncated"]!.GetValue<bool>());
         Assert.Equal(1, first["result_sets"]!.GetValue<int>());

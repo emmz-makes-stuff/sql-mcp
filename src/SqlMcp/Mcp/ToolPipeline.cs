@@ -72,7 +72,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
         var started = Stopwatch.GetTimestamp();
         try
         {
-            outcome = await engine.Executor.ExecuteAsync(db.Entry.ConnectionString!, sql, db.Limits, cancellationToken).ConfigureAwait(false);
+            outcome = await engine.Executor.ExecuteAsync(db.Entry.ConnectionString!, sql, BatchMode.ReadOnly, db.Limits, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
