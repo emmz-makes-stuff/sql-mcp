@@ -23,7 +23,7 @@ internal static class ToolDescriptions
         "If more pages remain, the result includes a handle: read on with next_page, or release it with abandon.";
 
     public const string NextPage =
-        "Returns the next page of a query result, given the handle from query. The last page is marked last_page and releases the handle. Handles also expire after 10 minutes idle; if one is unknown, run the query again.";
+        "Returns the next page of a query result, given the handle from query. The last page is marked last_page and releases the handle. Handles also expire after 10 minutes idle, and only the 20 most recently used are kept; if one is unknown, run the query again.";
 
     public const string Abandon =
         "Releases a query result handle and its buffered rows, when you don't need the remaining pages.";

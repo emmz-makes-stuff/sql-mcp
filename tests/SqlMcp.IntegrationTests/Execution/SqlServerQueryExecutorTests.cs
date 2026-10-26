@@ -78,7 +78,7 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
     [Fact]
     public async Task Byte_cap()
     {
-        // Each value is 1002 bytes as JSON, so a 10 KB cap holds 10 rows.
+        // Each value is 1000 bytes, so a 10 KB cap holds 10 rows.
         var outcome = await Run(
             "SELECT TOP (100) REPLICATE('x', 1000) AS filler FROM sys.all_objects",
             EffectiveLimits.Default with { MaxBytes = 10 * 1024 });
@@ -87,6 +87,67 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
         Assert.Equal(10, result.RowCount);
         Assert.True(result.Truncated);
         Assert.Contains("the 10 KB cap", result.TruncationMessage, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("varbinary(max)", "REPLICATE(CAST(0xAB AS varbinary(max)), 8388608)")]
+    [InlineData("nvarchar(max)", "REPLICATE(CAST(N'é' AS nvarchar(max)), 8388608)")]
+    [InlineData("xml", "N'<a>' + REPLICATE(CAST(N'é' AS nvarchar(max)), 8388608) + N'</a>'")]
+    [InlineData("xml", "N'<a>' + REPLICATE(CAST(N'<b>é</b>' AS nvarchar(max)), 1048576) + N'</a>'")]
+    [InlineData("json", "N'[\"' + REPLICATE(CAST(N'é' AS nvarchar(max)), 8388608) + N'\"]'")]
+    public async Task A_value_larger_than_the_cap_is_not_buffered(string type, string value)
+    {
+        // An 8 MB value under a 64 KB cap: the small row before it fits, and the large one truncates the result. Reading
+        // the value in whole would allocate well over 8 MB; streaming stops at the cap. (The count is process-wide, so
+        // the bound leaves room for tests running alongside.)
+        var allocated = GC.GetTotalAllocatedBytes(precise: true);
+        var outcome = await Run(
+            $"SELECT n, big FROM (SELECT 1 AS n, CAST(NULL AS {type}) AS big UNION ALL SELECT 2, CAST({value} AS {type})) AS t ORDER BY n",
+            EffectiveLimits.Default with { MaxBytes = 64 * 1024 });
+        allocated = GC.GetTotalAllocatedBytes(precise: true) - allocated;
+
+        Assert.InRange(allocated, 0, 8 * 1024 * 1024);
+        var result = Assert.IsType<QuerySucceeded>(outcome).Result;
+        Assert.Equal(1, result.RowCount);
+        Assert.True(result.Truncated);
+        Assert.Contains("the 64 KB cap", result.TruncationMessage, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("varbinary(max)", "REPLICATE(CAST(0xAB AS varbinary(max)), 3000)", 4000)]
+    [InlineData("nvarchar(max)", "REPLICATE(CAST(N'é' AS nvarchar(max)), 2000)", 4000)]
+    [InlineData("xml", "N'<a>' + REPLICATE(CAST(N'é' AS nvarchar(max)), 2000) + N'</a>'", 4007)]
+    public async Task A_large_value_counts_its_unescaped_size(string type, string value, int size)
+    {
+        // 3000 bytes are 4000 base64 characters; 2000 'é' are 4000 UTF-8 bytes, plus 7 for the xml's tags. Each fits a
+        // cap of exactly its size, and fails one a byte smaller.
+        var sql = $"SELECT CAST({value} AS {type}) AS big";
+
+        var fits = Assert.IsType<QuerySucceeded>(await Run(sql, EffectiveLimits.Default with { MaxBytes = size })).Result;
+        var over = Assert.IsType<QuerySucceeded>(await Run(sql, EffectiveLimits.Default with { MaxBytes = size - 1 })).Result;
+
+        Assert.Equal(1, fits.RowCount);
+        Assert.False(fits.Truncated);
+        Assert.Equal(0, over.RowCount);
+        Assert.True(over.Truncated);
+    }
+
+    [Fact]
+    public async Task An_xml_value_matches_SQL_Servers_own_text()
+    {
+        // xml is rebuilt from a reader, so it must come out as SQL Server serialises it. One leading 'x' then 5000
+        // emoji puts surrogate pairs across the 8192-character chunk boundary.
+        var result = Assert.IsType<QuerySucceeded>(await Run("""
+            DECLARE @x xml = N'<p:a xmlns:p="urn:x" xmlns="urn:d" t="1 &amp; &lt;2&gt; &quot;q&quot; ''s'' &#xA;&#x9;&#xD;é">'
+                + N'<b/><c></c><d>x &amp; y &lt; z &gt; w " '' &#xD; &#x9;</d><!-- note & < --><?pi data & < ?><?empty?>'
+                + N'<![CDATA[<raw> & ]]><r xml:space="preserve"><e> </e><e>  </e><e>&#x9;&#xA;</e><e>&#xD;</e><e>a  </e>'
+                + N'<e> &#xA;a&#xA;b </e></r><s> <t/> x <t/>  </s><u>&#x20;</u>'
+                + N'<f>x' + REPLICATE(CAST(N'😀' AS nvarchar(max)), 5000) + N'</f></p:a><g/>tail &amp;';
+            SELECT @x AS doc, CAST(@x AS nvarchar(max)) AS text;
+            """)).Result;
+
+        var row = result.ResultSets.Single().Rows.Single();
+        Assert.Equal(row[1]!.GetValue<string>(), row[0]!.GetValue<string>());
     }
 
     [Fact]

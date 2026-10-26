@@ -47,11 +47,15 @@ Results SHALL be returned in pages of the database's page size (default 100 rows
 - **THEN** the call fails with an error saying to run the query again
 
 ### Requirement: Abandoning a result
-An `abandon` tool SHALL release a result handle and its buffer at once. Handles SHALL also be released after an idle timeout (default 10 minutes), and when the session ends.
+An `abandon` tool SHALL release a result handle and its buffer at once. Handles SHALL also be released after an idle timeout (default 10 minutes), and when the session ends. A session SHALL hold at most 20 handles, which is not configurable: opening another SHALL release the least recently used.
 
 #### Scenario: Abandon
 - **WHEN** an agent calls `abandon` with an open handle
 - **THEN** the buffer is released, and later `next_page` calls with that handle fail
+
+#### Scenario: Too many open results
+- **WHEN** 20 handles are open and a query opens another
+- **THEN** the least recently used handle is released, and a later `next_page` call with it fails with the unknown-handle error
 
 ### Requirement: Query timeout
 Each query SHALL be subject to the database's command timeout (default 30 seconds). A query that times out SHALL be cancelled and rolled back, and the agent SHALL get an error saying it timed out.

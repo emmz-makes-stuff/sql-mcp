@@ -1,6 +1,5 @@
 using System.Data;
 using System.Globalization;
-using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Data.SqlClient;
 using SqlMcp.Audit;
@@ -87,7 +86,8 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         var byteCount = 0L;
         string? truncation = null;
 
-        var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        // Sequential access, so a large value is streamed against the byte cap instead of being read in whole first.
+        var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
         var completed = false;
         try
         {
@@ -110,17 +110,15 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
                         break;
                     }
 
-                    var row = SqlServerValues.ReadRow(reader, columns);
-                    var rowBytes = SizeOf(row);
-                    if (byteCount + rowBytes > limits.MaxBytes)
+                    if (await SqlServerValues.ReadRowAsync(reader, columns, limits.MaxBytes - byteCount, cancellationToken).ConfigureAwait(false) is not { } read)
                     {
                         truncation = TruncationMessage($"the {ByteSize.Format(limits.MaxBytes)} cap", rowCount, sets.Count - 1);
                         break;
                     }
 
-                    rows.Add(row);
+                    rows.Add(read.Row);
                     rowCount++;
-                    byteCount += rowBytes;
+                    byteCount += read.Size;
                 }
             }
             while (truncation is null && await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
@@ -183,18 +181,6 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         {
             await transaction.DisposeAsync().ConfigureAwait(false);
         }
-    }
-
-    /// <summary>The UTF-8 size of the row's values as JSON. This is what the byte cap counts.</summary>
-    private static long SizeOf(JsonNode?[] row)
-    {
-        var size = 0L;
-        foreach (var value in row)
-        {
-            size += value is null ? 4 : Encoding.UTF8.GetByteCount(value.ToJsonString());
-        }
-
-        return size;
     }
 
     private static string TruncationMessage(string cap, int rows, int resultSet) => string.Create(

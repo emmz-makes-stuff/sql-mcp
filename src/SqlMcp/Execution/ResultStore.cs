@@ -5,17 +5,23 @@ namespace SqlMcp.Execution;
 
 /// <summary>
 /// The session's buffered results, keyed by opaque handles (design D7). A handle is released when its last page is
-/// served, when it is abandoned, when it has been idle for <see cref="IdleTimeout"/>, or when the store is disposed
-/// at session end. Idle handles are swept by a timer, and expiry is also checked on every access, so a late sweep
-/// never serves an expired handle.
+/// served, when it is abandoned, when it has been idle for <see cref="IdleTimeout"/>, when <see cref="MaxHandles"/>
+/// newer results push it out, or when the store is disposed at session end. Idle handles are swept by a timer, and
+/// expiry is also checked on every access, so a late sweep never serves an expired handle.
 /// </summary>
 internal sealed class ResultStore : IDisposable
 {
     public const string UnknownHandleMessage =
-        "unknown or expired result handle: results are released after the last page, on abandon, and after 10 minutes idle. Run the query again.";
+        "unknown or expired result handle: results are released after the last page, on abandon, after 10 minutes idle, or when more than 20 results are open. Run the query again.";
 
     /// <summary>Spec: handles are released after 10 minutes idle. Not configurable.</summary>
     public static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Spec: at most 20 results are held, so a session's buffers stay within 20 times the byte cap. Opening one more
+    /// evicts the least recently used. Not configurable.
+    /// </summary>
+    public const int MaxHandles = 20;
 
     private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
 
@@ -23,6 +29,9 @@ internal sealed class ResultStore : IDisposable
     private readonly TimeProvider _time;
     private readonly ITimer _sweeper;
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+
+    // Orders handles by use for eviction. A counter, not the clock, so two uses in the same tick still have an order.
+    private long _uses;
     private bool _disposed;
 
     public ResultStore(TimeProvider time)
@@ -57,7 +66,12 @@ internal sealed class ResultStore : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (handle is not null)
             {
-                _entries.Add(handle, new Entry(result, spans) { NextPage = 1, LastTouched = _time.GetUtcNow() });
+                if (_entries.Count >= MaxHandles)
+                {
+                    EvictLeastRecentlyUsed();
+                }
+
+                _entries.Add(handle, new Entry(result, spans) { NextPage = 1, LastTouched = _time.GetUtcNow(), LastUse = ++_uses });
             }
         }
 
@@ -81,6 +95,7 @@ internal sealed class ResultStore : IDisposable
 
             index = entry.NextPage++;
             entry.LastTouched = _time.GetUtcNow();
+            entry.LastUse = ++_uses;
             if (entry.NextPage == entry.Spans.Count)
             {
                 _entries.Remove(handle);
@@ -114,6 +129,12 @@ internal sealed class ResultStore : IDisposable
                 }
             }
         }
+    }
+
+    private void EvictLeastRecentlyUsed()
+    {
+        var oldest = _entries.MinBy(e => e.Value.LastUse);
+        _entries.Remove(oldest.Key);
     }
 
     public void Dispose()
@@ -213,5 +234,7 @@ internal sealed class ResultStore : IDisposable
         public int NextPage { get; set; }
 
         public DateTimeOffset LastTouched { get; set; }
+
+        public long LastUse { get; set; }
     }
 }

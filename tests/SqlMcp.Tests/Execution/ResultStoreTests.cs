@@ -92,6 +92,33 @@ public sealed class ResultStoreTests : IDisposable
     }
 
     [Fact]
+    public void Too_many_open_results()
+    {
+        var handles = Enumerable.Range(0, ResultStore.MaxHandles).Select(_ => _store.Open(Result(Set(250)), pageSize: 100).Handle!).ToList();
+
+        // Using the oldest handle makes the second-oldest the least recently used, even within the same clock tick.
+        Assert.NotNull(_store.NextPage(handles[0]));
+        var newest = _store.Open(Result(Set(250)), pageSize: 100).Handle!;
+
+        Assert.Equal(ResultStore.MaxHandles, _store.Count);
+        Assert.Null(_store.NextPage(handles[1]));
+        Assert.NotNull(_store.NextPage(handles[0]));
+        Assert.NotNull(_store.NextPage(handles[2]));
+        Assert.NotNull(_store.NextPage(newest));
+        Assert.Contains("more than 20 results are open", ResultStore.UnknownHandleMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_result_that_fits_one_page_takes_no_slot()
+    {
+        var handles = Enumerable.Range(0, ResultStore.MaxHandles).Select(_ => _store.Open(Result(Set(250)), pageSize: 100).Handle!).ToList();
+
+        _store.Open(Result(Set(42)), pageSize: 100);
+
+        Assert.All(handles, h => Assert.NotNull(_store.NextPage(h)));
+    }
+
+    [Fact]
     public void Abandon()
     {
         var first = _store.Open(Result(Set(250)), pageSize: 100);

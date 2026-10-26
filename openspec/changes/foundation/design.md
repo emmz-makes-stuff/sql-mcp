@@ -243,8 +243,12 @@ tool call --> audit ok? --> resolve db --> group allowed? --> available? --> cla
 - [Inside Claude Code, `! sql-mcp approve` may not count as an interactive terminal] → Accepted. The user approves
   in their own terminal window, and that friction is intended.
 - [Failing closed on the audit log stops all work when the disk is full] → Intentional. The error is explicit.
-- [A large row cap times a wide row size uses a lot of memory] → The byte cap (5 MB) bounds each buffer, and idle
-  eviction bounds how long it is kept.
+- [A large row cap times a wide row size uses a lot of memory] → The byte cap (5 MB) bounds each buffer, counted in
+  unescaped UTF-8 bytes. The reader uses sequential access, and text, binary, `json` and `xml` values are streamed in
+  chunks that stop at the remaining budget, so a value larger than the cap is never read in whole. (`xml` is rebuilt
+  from SqlClient's XmlReader, its only streaming form, in SQL Server's own serialisation. Its parser still reads a
+  single attribute, comment or processing instruction whole.) A session holds at most 20 results, the least recently
+  used evicted first, so buffers total at most 20 times the cap; idle eviction bounds how long they are kept.
 
 ## Migration Plan
 

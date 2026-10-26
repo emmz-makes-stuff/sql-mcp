@@ -87,8 +87,8 @@
 
 ## 15. Review fixes: memory bounds
 
-- [ ] 15.1 Enforce the byte cap per value: read with `CommandBehavior.SequentialAccess`, check each large value's length against the remaining budget before reading it in, and count the cap in unescaped UTF-8 bytes. Correct design.md's memory risk row. Verify with integration tests for a `varbinary(max)` value and an `nvarchar(max)` value larger than `maxBytes`
-- [ ] 15.2 Cap the result store at 20 live handles, not configurable. Opening a 21st evicts the least recently used handle, whose next call gets the unknown-handle message. Add the scenario to `specs/query-execution/spec.md`. Verify with result store tests
+- [x] 15.1 Enforce the byte cap per value: read with `CommandBehavior.SequentialAccess`, check each large value's length against the remaining budget before reading it in, and count the cap in unescaped UTF-8 bytes. Correct design.md's memory risk row. Verify with integration tests for a `varbinary(max)` value and an `nvarchar(max)` value larger than `maxBytes`
+- [x] 15.2 Cap the result store at 20 live handles, not configurable. Opening a 21st evicts the least recently used handle, whose next call gets the unknown-handle message. Add the scenario to `specs/query-execution/spec.md`. Verify with result store tests
 
 ## 16. Review fixes: cleanup
 
