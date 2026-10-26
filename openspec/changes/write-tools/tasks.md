@@ -19,6 +19,7 @@
 - [ ] 3.2 Give procedures, functions and triggers (`CREATE`, `ALTER`, `CREATE OR ALTER`) the reason "procedures, functions and triggers can't be created through sql-mcp" through `Phrases`. Reject database- and security-level DDL. Verify with rows for "Procedure body is not inspected, so it is refused" and "Security object"
 - [ ] 3.3 Restrict execute to user procedures: no `sys` schema, no names starting `sp_`/`xp_` (ignoring case), and parameters that are literals, `NULL` or negated numbers, by position or by name. Verify with rows for "User procedure" and "System procedure", plus a variable-parameter row that stays rejected
 - [ ] 3.4 Add a "Write categories" section to `docs/classifier.md`. It covers what each write category accepts, the WHERE, names and system-procedure rules, why programmable objects are refused, and the procedure trust gap (NOCOUNT, a procedure's own ROLLBACK). Update `AllowlistGuardTests` if new top-level statement types were added. Verify that `AllowlistGuardTests` passes and the doc's examples match table rows
+- [ ] 3.5 Reword the WHERE-rule reasons so they ask for a filter that picks the rows to change, e.g. "DELETE needs a WHERE clause that picks the rows to change (at line 1, column 1)", without suggesting or naming an always-true filter (2026-10-26 decision, after a side-agent note that `WHERE 1 = 1` passes the rule). Verify with the existing "Delete everything" and UPDATE rows, updated to the new wording
 
 ## 4. Wrong-tool reasons per database
 

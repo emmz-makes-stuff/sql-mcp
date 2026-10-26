@@ -161,7 +161,9 @@ Motivation is in proposal.md. The behaviour is in the four delta specs.
   own]** → `XACT_ABORT` aborts the batch at error 266 when the procedure returns. Anything the procedure did after
   its own `ROLLBACK` is inside the trusted procedure. Documented in `docs/classifier.md`.
 - **[`WHERE 1 = 1` gets past the WHERE rule]** → Intended. The rule catches a forgotten filter, not a deliberate
-  one (ADR-0002's threat model). The affected-rows cap still applies.
+  one (ADR-0002's threat model). The affected-rows cap still applies. The rejection reason asks for a filter that
+  picks the rows to change, so an agent isn't nudged towards an always-true one (task 3.5, 2026-10-26). Blocking
+  tautologies was rejected as an arms race: `WHERE id > 0` does the same.
 - **[Queries can still read other databases with three-part names]** → Out of scope here: the specs limit the names
   rule to writes. A follow-up can decide whether `query` should keep within the target database too.
 - **[A three-part scalar function call, `otherdb.dbo.fn(x)`, gets past the names rule in a write]** → Accepted
