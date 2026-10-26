@@ -117,7 +117,8 @@ public sealed class RegisterCommandTests : IDisposable
     }
 
     [Theory]
-    [InlineData("sql-mcp.bat", "sql-mcp")]
+    // Upper case to match PATHEXT exactly: Windows ignores case, but the Linux CI filesystem doesn't.
+    [InlineData("sql-mcp.BAT", "sql-mcp")]
     [InlineData("sql-mcp", "dnx")]
     public async Task On_windows_sql_mcp_is_on_path_only_with_a_PATHEXT_extension(string installed, string launcher)
     {
