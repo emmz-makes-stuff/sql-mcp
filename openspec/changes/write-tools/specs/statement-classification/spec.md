@@ -27,7 +27,7 @@ Each tool SHALL run only statements classified into its own category. A statemen
 - **THEN** it is rejected, with the reason "classified as command; the command tool is denied on this database"
 
 ### Requirement: Command statements
-A `command` statement SHALL be accepted when its reads use only syntax a `query` accepts, extended with: the target of INSERT, UPDATE, DELETE or MERGE, joins and CTEs in the statement, an `OUTPUT` clause (including `OUTPUT INTO` a table or table variable in the same statement), `NEXT VALUE FOR`, and table hints.
+A `command` statement SHALL be accepted when its reads use only syntax a `query` accepts, extended with: the target of INSERT, UPDATE, DELETE or MERGE, joins and CTEs in the statement, an `OUTPUT` clause (including `OUTPUT INTO` a table), `NEXT VALUE FOR`, and table hints.
 
 #### Scenario: Update through a join
 - **WHEN** the classifier is given `UPDATE o SET o.status = 'late' FROM dbo.orders o JOIN dbo.customers c ON c.id = o.customer_id WHERE c.region = 'EU'`
@@ -42,7 +42,7 @@ A `command` statement SHALL be accepted when its reads use only syntax a `query`
 - **THEN** it is classified as command
 
 ### Requirement: UPDATE and DELETE need a WHERE clause
-An UPDATE or DELETE statement without a `WHERE` clause SHALL be rejected, with a reason that says a `WHERE` clause is required. MERGE is not affected, because its `ON` clause already limits it.
+An UPDATE or DELETE statement without a `WHERE` clause SHALL be rejected, with a reason that says a `WHERE` clause is required. MERGE is not affected, because its `ON` clause already limits it. Nor is an UPDATE or DELETE whose target is a common table expression of the same statement, because the CTE's query does the filtering.
 
 #### Scenario: Delete everything
 - **WHEN** the command tool is given `DELETE FROM dbo.users`
@@ -50,6 +50,10 @@ An UPDATE or DELETE statement without a `WHERE` clause SHALL be rejected, with a
 
 #### Scenario: Update with a filter
 - **WHEN** the command tool is given `UPDATE dbo.users SET active = 0 WHERE last_login < '2025-01-01'`
+- **THEN** it is classified as command
+
+#### Scenario: Update through a filtering CTE
+- **WHEN** the command tool is given `WITH x AS (SELECT a FROM dbo.t WHERE b = 1) UPDATE x SET a = 0`
 - **THEN** it is classified as command
 
 ### Requirement: DDL covers declarative objects only

@@ -50,6 +50,8 @@ internal static class Allowlists
         typeof(QualifiedJoin),
         typeof(UnqualifiedJoin),
         typeof(QueryDerivedTable),
+        typeof(InlineDerivedTable),
+        typeof(RowValue),
         typeof(SchemaObjectFunctionTableReference),
         typeof(PivotedTableReference),
         typeof(UnpivotedTableReference),
@@ -138,12 +140,17 @@ internal static class Allowlists
         typeof(SubqueryComparisonPredicate),
     ];
 
+    /// <summary>
+    /// A command reads with everything a query may use, plus the DML nodes (design W5). Locking hints and
+    /// <c>NEXT VALUE FOR</c> are fine here: the write takes those locks and advances sequences anyway.
+    /// </summary>
     private static readonly HashSet<Type> Command =
     [
+        .. Query,
+
         typeof(InsertStatement),
         typeof(InsertSpecification),
         typeof(ValuesInsertSource),
-        typeof(RowValue),
         typeof(SelectInsertSource),
         typeof(UpdateStatement),
         typeof(UpdateSpecification),
@@ -155,22 +162,10 @@ internal static class Allowlists
         typeof(MergeActionClause),
         typeof(UpdateMergeAction),
         typeof(InsertMergeAction),
-
-        // The SELECT of INSERT ... SELECT, and filters.
-        typeof(QuerySpecification),
-        typeof(SelectScalarExpression),
-        typeof(FromClause),
-        typeof(WhereClause),
-        typeof(NamedTableReference),
-
-        typeof(Identifier),
-        typeof(MultiPartIdentifier),
-        typeof(SchemaObjectName),
-        typeof(ColumnReferenceExpression),
-        typeof(IntegerLiteral),
-        typeof(StringLiteral),
-        typeof(BinaryExpression),
-        typeof(BooleanComparisonExpression),
+        typeof(DeleteMergeAction),
+        typeof(OutputClause),
+        typeof(OutputIntoClause),
+        typeof(NextValueForExpression),
     ];
 
     private static readonly HashSet<Type> Ddl =

@@ -4,8 +4,9 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 namespace SqlMcp.Classification.SqlServer;
 
 /// <summary>
-/// Checks for nodes whose meaning depends on more than their type (design D6): SELECT INTO, table hint kinds, and
-/// dynamic or indirect EXEC. Returns a rejection reason, or null.
+/// Checks for nodes whose meaning depends on more than their type (design D6, W5): SELECT INTO and rowset functions
+/// everywhere; table hint kinds in a query; the WHERE and names rules in the write categories; and dynamic or
+/// indirect EXEC. Returns a rejection reason, or null.
 /// </summary>
 internal static class SideEffectChecks
 {
@@ -42,6 +43,19 @@ internal static class SideEffectChecks
     {
         SelectStatement { Into: not null } =>
             $"SELECT ... INTO {At(node)} creates a table, so it is not a query",
+        OpenQueryTableReference or OpenRowsetTableReference or BulkOpenRowset or InternalOpenRowset or OpenRowsetCosmos
+            or AdHocTableReference =>
+            $"{Phrases.For(node)} {At(node)} reaches outside the database, so no tool runs it",
+        UpdateStatement { UpdateSpecification: { WhereClause: null } update } statement
+            when !TargetsCte(update.Target, statement.WithCtesAndXmlNamespaces) =>
+            $"UPDATE needs a WHERE clause {At(node)}",
+        DeleteStatement { DeleteSpecification: { WhereClause: null } delete } statement
+            when !TargetsCte(delete.Target, statement.WithCtesAndXmlNamespaces) =>
+            $"DELETE needs a WHERE clause {At(node)}",
+        SchemaObjectName name when IsWrite(category) && (name.DatabaseIdentifier is not null || name.ServerIdentifier is not null) =>
+            $"{OtherDatabase} {Dotted(name.Identifiers)} {At(node)} has a database or server part",
+        ColumnReferenceExpression { MultiPartIdentifier.Count: >= 4 } column when IsWrite(category) =>
+            $"{OtherDatabase} column {Dotted(column.MultiPartIdentifier.Identifiers)} {At(node)} has a database part",
         TableHint hint when category == StatementCategory.Query && !QueryHints.Contains(hint.HintKind) =>
             LockingHints.Contains(hint.HintKind)
                 ? $"table hint {HintName(hint)} {At(node)} takes update or exclusive locks or escalates locking, so it is not allowed in a query"
@@ -58,6 +72,23 @@ internal static class SideEffectChecks
             $"sp_executesql {At(node)} runs dynamic SQL, which can't be classified",
         _ => null,
     };
+
+    private const string OtherDatabase = "writes may only name objects in the target database:";
+
+    /// <summary>Grants are per database, so a write may not reach another one through a three- or four-part name.</summary>
+    private static bool IsWrite(StatementCategory category) => category is not StatementCategory.Query;
+
+    /// <summary>
+    /// A target that is a CTE of the same statement needs no WHERE: the CTE's query does the filtering (2026-10-26
+    /// decision). The affected-rows cap still applies.
+    /// </summary>
+    private static bool TargetsCte(TableReference target, WithCtesAndXmlNamespaces? with) =>
+        target is NamedTableReference { SchemaObject: { SchemaIdentifier: null, DatabaseIdentifier: null, ServerIdentifier: null } name }
+        && with is not null
+        && with.CommonTableExpressions.Any(cte =>
+            string.Equals(cte.ExpressionName.Value, name.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase));
+
+    private static string Dotted(IEnumerable<Identifier> identifiers) => string.Join(".", identifiers.Select(i => i.Value));
 
     private static bool IsSpExecuteSql(ExecutableProcedureReference reference) =>
         string.Equals(

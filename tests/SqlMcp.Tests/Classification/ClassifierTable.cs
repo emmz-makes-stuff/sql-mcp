@@ -18,7 +18,7 @@ internal static class ClassifierTable
     {
         // Spec: each category is recognised.
         { "SELECT 1", Query },
-        { "UPDATE t SET a = 1", Command },
+        { "UPDATE t SET a = 1 WHERE id = 2", Command },
         { "ALTER TABLE t ADD c int", Ddl },
         { "TRUNCATE TABLE t", Ddl },
         { "EXEC dbo.p", Execute },
@@ -32,8 +32,34 @@ internal static class ClassifierTable
         { "INSERT INTO dbo.t (a) SELECT a FROM s WHERE b > 0", Command },
         { "UPDATE t SET a = a + 1 WHERE id = 3", Command },
         { "DELETE FROM t WHERE id = 3", Command },
-        { "DELETE t", Command },
+        { "DELETE t WHERE id = 3", Command },
         { "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = s.a WHEN NOT MATCHED THEN INSERT (id, a) VALUES (s.id, s.a);", Command },
+
+        // Command statements (write-tools §2): spec scenarios.
+        { "UPDATE o SET o.status = 'late' FROM dbo.orders o JOIN dbo.customers c ON c.id = o.customer_id WHERE c.region = 'EU'", Command },
+        { "WITH old AS (SELECT TOP (100) * FROM dbo.jobs WHERE done = 1 ORDER BY id) DELETE FROM old OUTPUT deleted.id", Command },
+        { "INSERT INTO dbo.t (id, name) VALUES (NEXT VALUE FOR dbo.seq, 'a')", Command },
+        { "UPDATE dbo.users SET active = 0 WHERE last_login < '2025-01-01'", Command },
+
+        // Command corpus: reads use the query allowlist.
+        { "INSERT INTO dbo.archive (id, total) SELECT o.id, SUM(l.qty * l.price) FROM dbo.orders o JOIN dbo.lines l ON l.order_id = o.id WHERE o.closed_at < DATEADD(year, -1, GETDATE()) GROUP BY o.id", Command },
+        { "UPDATE t SET total = (SELECT SUM(x) FROM u WHERE u.t_id = t.id), updated = SYSUTCDATETIME() WHERE EXISTS (SELECT 1 FROM u WHERE u.t_id = t.id)", Command },
+        { "DELETE FROM dbo.sessions WHERE user_id IN (SELECT id FROM dbo.users WHERE active = 0)", Command },
+        { "DELETE TOP (10) s FROM dbo.sessions s JOIN dbo.users u ON u.id = s.user_id WHERE u.active = 0", Command },
+        { "MERGE dbo.t AS tgt USING dbo.s AS src ON tgt.id = src.id WHEN MATCHED AND tgt.a <> src.a THEN UPDATE SET a = src.a WHEN NOT MATCHED BY TARGET THEN INSERT (id, a) VALUES (src.id, src.a) WHEN NOT MATCHED BY SOURCE THEN DELETE OUTPUT $action, inserted.id, deleted.id;", Command },
+        { "MERGE dbo.t AS tgt USING (VALUES (1, 'a'), (2, 'b')) AS src (id, a) ON tgt.id = src.id WHEN NOT MATCHED THEN INSERT (id, a) VALUES (src.id, src.a);", Command },
+        { "UPDATE dbo.t SET a = 0 OUTPUT deleted.id, deleted.a INTO dbo.audit (id, old_a) WHERE a < 0", Command },
+
+        // Locking hints are allowed in a command: the write takes those locks anyway.
+        { "UPDATE t WITH (ROWLOCK, UPDLOCK) SET a = 1 WHERE id = 2", Command },
+        { "DELETE FROM t WITH (TABLOCK) WHERE a < 0", Command },
+        { "INSERT INTO t (a) SELECT a FROM s WITH (UPDLOCK, HOLDLOCK) WHERE b = 1", Command },
+
+        // The WHERE rule exempts a CTE target: the CTE's query does the filtering.
+        { "WITH x AS (SELECT a FROM dbo.t WHERE b = 1) UPDATE x SET a = 0", Command },
+
+        // Queries may still read other databases; only writes are kept to the target database.
+        { "SELECT a FROM otherdb.dbo.t", Query },
 
         // DDL basics.
         { "CREATE TABLE t (id int NOT NULL PRIMARY KEY, name nvarchar(50) NULL)", Ddl },
@@ -113,6 +139,7 @@ internal static class ClassifierTable
         { "SELECT a, (SELECT MAX(b) FROM u WHERE u.a = t.a) AS mb FROM t", Query },
         { "SELECT a FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.a = t.a) AND b IN (SELECT b FROM v) AND c > ALL (SELECT c FROM w)", Query },
         { "SELECT d.a FROM (SELECT a FROM t) AS d", Query },
+        { "SELECT v.a, v.b FROM (VALUES (1, 'x'), (2, 'y')) AS v (a, b)", Query },
 
         // Grouping.
         { "SELECT a, b, SUM(c) FROM t GROUP BY ROLLUP (a, b)", Query },
@@ -167,6 +194,31 @@ internal static class ClassifierTable
         { "EXEC sys.sp_executesql N'SELECT 1'", "dynamic SQL" },
         { "EXEC @proc", "named by a variable" },
         { "EXEC ('SELECT 1') AT lnk", "linked server" },
+
+        // Rowset functions are rejected in every category.
+        { "INSERT INTO t (a) SELECT a FROM OPENQUERY(lnk, 'SELECT 1')", "OPENQUERY" },
+        { "INSERT INTO t (a) SELECT BulkColumn FROM OPENROWSET(BULK 'c:\\x.csv', SINGLE_CLOB) AS b", "OPENROWSET" },
+
+        // UPDATE and DELETE need a WHERE clause.
+        { "DELETE FROM dbo.users", "DELETE needs a WHERE clause" },
+        { "UPDATE dbo.users SET active = 0", "UPDATE needs a WHERE clause" },
+        { "UPDATE o SET status = 'x' FROM dbo.orders o JOIN dbo.customers c ON c.id = o.customer_id", "UPDATE needs a WHERE clause" },
+        { "WITH x AS (SELECT 1 AS a) DELETE FROM dbo.t", "DELETE needs a WHERE clause" },
+
+        // Writes stay in the target database.
+        { "INSERT INTO sales.dbo.orders (id) VALUES (1)", "writes may only name objects in the target database" },
+        { "INSERT INTO dbo.t (a) SELECT a FROM otherdb.dbo.s WHERE b = 1", "otherdb.dbo.s" },
+        { "UPDATE t SET a = 1 FROM srv.db.dbo.t WHERE id = 1", "srv.db.dbo.t" },
+        { "UPDATE t SET a = db.dbo.u.b FROM dbo.u WHERE id = 1", "column db.dbo.u.b" },
+        { "DROP TABLE otherdb.dbo.t", "writes may only name objects in the target database" },
+        { "EXEC app.dbo.p", "writes may only name objects in the target database" },
+        { "EXEC remote.app.dbo.p", "writes may only name objects in the target database" },
+
+        // Still outside the command allowlist.
+        { "UPDATE t SET a = @x WHERE id = 1", "a @variable" },
+        { "INSERT INTO t EXEC dbo.p", "ExecuteInsertSource" },
+        { "UPDATE t SET a = 1 WHERE CURRENT OF c", "CursorId" },
+        { "DELETE FROM t OUTPUT deleted.id INTO @ids WHERE id = 1", "VariableTableReference" },
 
         // Spec: unrecognised syntax names the element.
         { "SELECT @x = 1", "assigning to a @variable" },

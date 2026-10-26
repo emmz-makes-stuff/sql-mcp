@@ -115,7 +115,7 @@ public class ClassifierTests
     [Fact]
     public void Wrong_tool()
     {
-        var verdict = _classifier.Classify("DELETE FROM t").ForTool(StatementCategory.Query, AllTools);
+        var verdict = _classifier.Classify("DELETE FROM t WHERE id = 1").ForTool(StatementCategory.Query, AllTools);
 
         Assert.Equal(BatchVerdict.Reject("classified as command; use the command tool"), verdict);
     }
@@ -123,7 +123,7 @@ public class ClassifierTests
     [Fact]
     public void Wrong_tool_that_the_server_does_not_have_yet()
     {
-        var verdict = _classifier.Classify("DELETE FROM t").ForTool(StatementCategory.Query, QueryOnly);
+        var verdict = _classifier.Classify("DELETE FROM t WHERE id = 1").ForTool(StatementCategory.Query, QueryOnly);
 
         Assert.Equal(BatchVerdict.Reject("classified as command; this server has no command tool yet"), verdict);
     }

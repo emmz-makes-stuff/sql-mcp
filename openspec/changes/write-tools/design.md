@@ -88,6 +88,9 @@ Motivation is in proposal.md. The behaviour is in the four delta specs.
 - **WHERE rule:** an `UpdateSpecification` or `DeleteSpecification` with a null `WhereClause` is rejected with
   "UPDATE needs a WHERE clause" or "DELETE needs a WHERE clause". `WHERE CURRENT OF` is a cursor, and stays
   rejected, because cursors aren't on any allowlist.
+  - A target that names a CTE of the same statement is exempt, because the CTE's query does the filtering
+    (2026-10-26 decision; the "CTE and OUTPUT" scenario needs it). The affected-rows cap still applies. The check
+    sits on `UpdateStatement`/`DeleteStatement`, which hold the CTEs.
 - **Names rule:** in the write categories, a `SchemaObjectName` with a `DatabaseIdentifier` or `ServerIdentifier`
   is rejected. So is a column reference with four or more parts. Queries are unchanged (see Risks).
 - **DDL**:
@@ -161,6 +164,11 @@ Motivation is in proposal.md. The behaviour is in the four delta specs.
   one (ADR-0002's threat model). The affected-rows cap still applies.
 - **[Queries can still read other databases with three-part names]** → Out of scope here: the specs limit the names
   rule to writes. A follow-up can decide whether `query` should keep within the target database too.
+- **[A three-part scalar function call, `otherdb.dbo.fn(x)`, gets past the names rule in a write]** → Accepted
+  (2026-10-26). ScriptDom gives it the same shape as an XML or CLR method call on a column (`n.c.value(...)`,
+  `geo.STDistance(...)`), so syntax can't tell them apart. A scalar function can only read, which `query` allows
+  anyway. Tables, views, table-valued functions, sequences and procedures with a database or server part are all
+  caught. `docs/classifier.md` records the gap (task 3.4).
 - **[DDL inside the transaction can block other sessions on schema locks for the length of the call]** → The call
   is short, and the timeout bounds it.
 

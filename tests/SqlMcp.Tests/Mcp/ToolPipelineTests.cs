@@ -224,14 +224,14 @@ public sealed class ToolPipelineTests : IDisposable
         _builder.User(OneDatabase);
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users", Cancel);
+        var result = await new ToolPipeline(session).QueryAsync(Sales, "DELETE FROM dbo.users WHERE id = 1", Cancel);
 
         Assert.True(result.IsError);
         Assert.Equal("Rejected, nothing was sent to the database: classified as command; this server has no command tool yet", result.Text);
         Assert.Empty(_builder.Executor.Calls);
 
         var denied = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "denied");
-        Assert.Equal("DELETE FROM dbo.users", denied["sql"]!.GetValue<string>());
+        Assert.Equal("DELETE FROM dbo.users WHERE id = 1", denied["sql"]!.GetValue<string>());
         Assert.Equal(result.Text, denied["reason"]!.GetValue<string>());
         Assert.Null(denied["source"]);
     }

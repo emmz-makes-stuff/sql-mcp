@@ -8,10 +8,10 @@
 
 ## 2. Classifier: command statements
 
-- [ ] 2.1 Make `SideEffectChecks` per category (design W5): `SELECT … INTO` and the rowset functions stay rejected everywhere, while locking hints and `NEXT VALUE FOR` are allowed in a command. Verify that every existing query row in `ClassifierTable` still passes, plus new rows for the "Sequence in an insert" scenario
-- [ ] 2.2 Extend the command allowlist with the query read allowlist plus joins, CTEs, subqueries, expressions and functions, `OUTPUT`/`OUTPUT INTO`, `MERGE` with `WHEN NOT MATCHED BY SOURCE`, and table hints. Each type comes with the table row that needs it. Verify with rows for "Update through a join", "CTE and OUTPUT", and a corpus of INSERT…SELECT, UPDATE…FROM, DELETE with a subquery, and MERGE
-- [ ] 2.3 Reject UPDATE and DELETE without a `WHERE` clause, with the reason "UPDATE needs a WHERE clause" or "DELETE needs a WHERE clause". Verify with rows for "Delete everything" and "Update with a filter", and a MERGE row that stays accepted
-- [ ] 2.4 Reject three- and four-part object names, and column references of four or more parts, in the command, ddl and execute categories, with the reason that writes may only name objects in the target database. Queries are unchanged. Verify with rows for "Write to another database" and a query row reading `otherdb.dbo.t` that stays accepted
+- [x] 2.1 Make `SideEffectChecks` per category (design W5): `SELECT … INTO` and the rowset functions stay rejected everywhere, while locking hints and `NEXT VALUE FOR` are allowed in a command. Verify that every existing query row in `ClassifierTable` still passes, plus new rows for the "Sequence in an insert" scenario
+- [x] 2.2 Extend the command allowlist with the query read allowlist plus joins, CTEs, subqueries, expressions and functions, `OUTPUT`/`OUTPUT INTO`, `MERGE` with `WHEN NOT MATCHED BY SOURCE`, and table hints. Each type comes with the table row that needs it. Verify with rows for "Update through a join", "CTE and OUTPUT", and a corpus of INSERT…SELECT, UPDATE…FROM, DELETE with a subquery, and MERGE
+- [x] 2.3 Reject UPDATE and DELETE without a `WHERE` clause, with the reason "UPDATE needs a WHERE clause" or "DELETE needs a WHERE clause". Verify with rows for "Delete everything" and "Update with a filter", and a MERGE row that stays accepted
+- [x] 2.4 Reject three- and four-part object names, and column references of four or more parts, in the command, ddl and execute categories, with the reason that writes may only name objects in the target database. Queries are unchanged. Verify with rows for "Write to another database" and a query row reading `otherdb.dbo.t` that stays accepted
 
 ## 3. Classifier: DDL and execute
 

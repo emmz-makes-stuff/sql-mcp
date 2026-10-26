@@ -106,7 +106,7 @@ public sealed class ServeTests : IAsyncLifetime
     {
         var client = await Connect();
 
-        var result = await Call(client, "query", new() { ["database"] = Database, ["sql"] = $"DELETE FROM dbo.{_table}" });
+        var result = await Call(client, "query", new() { ["database"] = Database, ["sql"] = $"DELETE FROM dbo.{_table} WHERE 1 = 1" });
 
         Assert.True(result.IsError);
         Assert.Equal("Rejected, nothing was sent to the database: classified as command; this server has no command tool yet", Text(result));
@@ -116,7 +116,7 @@ public sealed class ServeTests : IAsyncLifetime
         Assert.DoesNotContain(events, e => e["event"]!.GetValue<string>() == "executed");
         var denied = events.Single(e => e["event"]!.GetValue<string>() == "denied");
         Assert.Equal("query", denied["tool"]!.GetValue<string>());
-        Assert.Equal($"DELETE FROM dbo.{_table}", denied["sql"]!.GetValue<string>());
+        Assert.Equal($"DELETE FROM dbo.{_table} WHERE 1 = 1", denied["sql"]!.GetValue<string>());
         Assert.Contains("classified as command", denied["reason"]!.GetValue<string>(), StringComparison.Ordinal);
     }
 

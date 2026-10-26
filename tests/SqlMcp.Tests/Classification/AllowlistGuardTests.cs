@@ -33,6 +33,24 @@ public class AllowlistGuardTests
         Assert.DoesNotContain(Allowlists.For(StatementCategory.Query), type => type.Name == typeName);
     }
 
+    /// <summary>Rowset functions reach outside the database, so no category may accept them (design W5).</summary>
+    public static TheoryData<string> NeverAnywhere => new(
+        nameof(OpenQueryTableReference),
+        nameof(OpenRowsetTableReference),
+        nameof(BulkOpenRowset),
+        nameof(InternalOpenRowset),
+        nameof(OpenRowsetCosmos),
+        nameof(AdHocTableReference));
+
+    [Theory]
+    [MemberData(nameof(NeverAnywhere))]
+    public void No_allowlist_includes(string typeName)
+    {
+        var categories = new[] { StatementCategory.Query, StatementCategory.Command, StatementCategory.Ddl, StatementCategory.Execute };
+
+        Assert.All(categories, category => Assert.DoesNotContain(Allowlists.For(category), type => type.Name == typeName));
+    }
+
     [Fact]
     public void Every_allowlisted_type_is_a_scriptdom_node()
     {
