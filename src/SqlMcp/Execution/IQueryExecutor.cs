@@ -26,6 +26,12 @@ internal enum BatchMode
     Write,
 }
 
+/// <summary>Wording every write failure shares, whichever layer reports it.</summary>
+internal static class WriteMessages
+{
+    public const string NothingCommitted = "The batch was rolled back, so nothing was committed.";
+}
+
 internal abstract record QueryOutcome(TimeSpan Duration);
 
 /// <summary>

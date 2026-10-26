@@ -15,7 +15,10 @@ internal sealed record SessionStartEvent(string Version, IReadOnlyList<string> C
 
 internal sealed record SessionEndEvent(string Version, IReadOnlyList<string> ConfigFiles) : AuditEvent("session_end");
 
-/// <summary>A batch that ran. <see cref="Rows"/> is a count of rows returned or affected, never their values.</summary>
+/// <summary>
+/// A batch that ran, and for a write, was committed. <see cref="Rows"/> counts the rows returned, and
+/// <see cref="RowsAffected"/> each statement's reported count for a write (null for a read). Counts only, never values.
+/// </summary>
 internal sealed record ExecutedEvent(
     string Tool,
     string Database,
@@ -23,7 +26,8 @@ internal sealed record ExecutedEvent(
     IReadOnlyList<string> Classification,
     long DurationMs,
     long Rows,
-    bool Truncated) : AuditEvent("executed");
+    bool Truncated,
+    IReadOnlyList<int>? RowsAffected = null) : AuditEvent("executed");
 
 /// <summary>A call refused before anything ran. <see cref="Source"/> says where a permission denial came from.</summary>
 internal sealed record DeniedEvent(string Tool, string? Database, string? Sql, string Reason, string? Source = null) : AuditEvent("denied");
@@ -42,6 +46,8 @@ internal enum FailureKind
 /// <summary>
 /// An execution error. Only the error's number, severity and state are kept: SQL Server messages can echo row
 /// values, so the message text is never logged (2026-10-25 devlog decision).
+/// For a write, a failure means it was rolled back; <see cref="Cap"/> and <see cref="Affected"/> are set when the
+/// affected-rows cap rolled it back.
 /// </summary>
 internal sealed record FailedEvent(
     string Tool,
@@ -51,7 +57,12 @@ internal sealed record FailedEvent(
     int? ErrorNumber,
     int? Severity,
     int? State,
-    long DurationMs) : AuditEvent("failed");
+    long DurationMs) : AuditEvent("failed")
+{
+    public int? Cap { get; init; }
+
+    public long? Affected { get; init; }
+}
 
 /// <summary>An introspection call (used by the introspection change). <see cref="Target"/> is an object name.</summary>
 internal sealed record IntrospectionEvent(string Tool, string Database, string? Target) : AuditEvent("introspection");

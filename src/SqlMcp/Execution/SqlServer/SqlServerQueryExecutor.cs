@@ -21,7 +21,7 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
     /// <summary>SqlClient reports a command timeout as error number -2.</summary>
     private const int TimeoutErrorNumber = -2;
 
-    private const string NothingCommitted = "The batch was rolled back, so nothing was committed.";
+    private const string NothingCommitted = WriteMessages.NothingCommitted;
 
     public async Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, BatchMode mode, EffectiveLimits limits, CancellationToken cancellationToken)
     {

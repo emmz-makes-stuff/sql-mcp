@@ -85,5 +85,114 @@ public sealed class ToolCatalogTests : IDisposable
         Assert.Equal(["list_databases"], Names(session));
     }
 
+    [Fact]
+    public void Client_sees_a_destructive_tool()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
+        using var session = _builder.Build();
+
+        var command = Tool(session, ToolNames.Command);
+
+        Assert.False(command.Annotations?.ReadOnlyHint);
+        Assert.True(command.Annotations?.DestructiveHint);
+        Assert.False(command.Annotations?.IdempotentHint);
+        Assert.False(command.Annotations?.OpenWorldHint);
+        Assert.Contains("commits all or nothing", command.Description, StringComparison.Ordinal);
+        Assert.Contains("Make each change as narrow as you can", command.Description, StringComparison.Ordinal);
+        Assert.Contains("runs in full before it is undone", command.Description, StringComparison.Ordinal);
+        Assert.Contains("count the matching rows with query first", command.Description, StringComparison.Ordinal);
+        Assert.Contains("need a WHERE clause", command.Description, StringComparison.Ordinal);
+        Assert.EndsWith("Default affected-rows cap: 1000 rows per batch.", command.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Every_write_tool_is_destructive_and_states_the_cap()
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        foreach (var name in new[] { ToolNames.Command, ToolNames.Ddl, ToolNames.Execute })
+        {
+            var tool = Tool(session, name);
+            Assert.False(tool.Annotations?.ReadOnlyHint, name);
+            Assert.True(tool.Annotations?.DestructiveHint, name);
+            Assert.Contains("commits all or nothing", tool.Description, StringComparison.Ordinal);
+            Assert.Contains("affected-rows cap: 1000", tool.Description, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Execute_says_what_the_cap_counts()
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        var execute = Tool(session, ToolNames.Execute);
+
+        Assert.Contains("counts every row count the server reports, including rows a procedure's SELECT returns", execute.Description, StringComparison.Ordinal);
+        Assert.Contains("NOCOUNT ON", execute.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_database_with_another_cap_is_named_where_the_tool_runs()
+    {
+        // Sales allows command with a cap of 50; Hr has a cap of 10 but doesn't allow command.
+        _builder.User("""
+            { "databases": [
+                { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"], "limits": { "maxAffectedRows": 50 } },
+                { "connectionString": "Server=sqlhost;Database=Hr", "limits": { "maxAffectedRows": 10 } } ] }
+            """);
+        using var session = _builder.Build();
+
+        Assert.EndsWith(
+            "Default affected-rows cap: 1000 rows per batch. Databases with another cap: sqlhost:1433/sales: 50.",
+            Tool(session, ToolNames.Command).Description,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Every_tool_when_every_group_is_allowed()
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon"], Names(session));
+    }
+
+    [Fact]
+    public void Paging_is_offered_with_command_alone()
+    {
+        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
+        using var session = _builder.Build();
+
+        Assert.Equal(["list_databases", "command", "next_page", "abandon"], Names(session));
+    }
+
+    [Fact]
+    public void Ddl_alone_returns_no_rows_so_paging_is_not_offered()
+    {
+        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["ddl"] } ] }""");
+        using var session = _builder.Build();
+
+        Assert.Equal(["list_databases", "ddl"], Names(session));
+    }
+
+    [Fact]
+    public void The_query_tool_keeps_its_read_only_annotations()
+    {
+        _builder.User(AllWrites);
+        using var session = _builder.Build();
+
+        var query = Tool(session, ToolNames.Query);
+
+        Assert.True(query.Annotations?.ReadOnlyHint);
+        Assert.False(query.Annotations?.DestructiveHint);
+    }
+
+    private const string AllWrites = """{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command", "ddl", "execute"] } ] }""";
+
+    private static ModelContextProtocol.Protocol.Tool Tool(SqlMcpSession session, string name) =>
+        ToolCatalog.Build(session).Single(t => t.ProtocolTool.Name == name).ProtocolTool;
+
     private static List<string> Names(SqlMcpSession session) => [.. ToolCatalog.Build(session).Select(t => t.ProtocolTool.Name)];
 }

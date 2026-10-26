@@ -24,10 +24,14 @@ internal sealed class FakeExecutor : IQueryExecutor
     /// <summary>When set, the call throws this, as an executor bug or an unreadable value would.</summary>
     public Exception? Throws { get; set; }
 
+    /// <summary>Runs while the batch "executes", e.g. to take the audit log away before the outcome is logged.</summary>
+    public Action? During { get; set; }
+
     public Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, BatchMode mode, EffectiveLimits limits, CancellationToken cancellationToken)
     {
         Calls.Add(sql);
         Modes.Add(mode);
+        During?.Invoke();
         if (Throws is not null)
         {
             return Task.FromException<QueryOutcome>(Throws);

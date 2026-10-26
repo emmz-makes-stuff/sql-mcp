@@ -22,10 +22,47 @@ internal static class ToolDescriptions
         "If more pages remain, the result includes a handle: read on with next_page, or release it with abandon.";
 
     public const string NextPage =
-        "Returns the next page of a query result, given the handle from query. The last page is marked last_page and releases the handle. Handles also expire after 10 minutes idle, and only the 20 most recently used are kept; if one is unknown, run the query again.";
+        "Returns the next page of a result, given the handle from query, command or execute. The last page is marked last_page and releases the handle. Handles also expire after 10 minutes idle, and only the 20 most recently used are kept; if one is unknown, run the query again (never rerun a write to see its rows: it has already been committed).";
 
     public const string Abandon =
-        "Releases a query result handle and its buffered rows, when you don't need the remaining pages.";
+        "Releases a result handle and its buffered rows, when you don't need the remaining pages.";
+
+    /// <summary>What every write tool's description says about the transaction and the cap (spec: write tool descriptions).</summary>
+    private const string WriteGuidance =
+        "The batch runs in one transaction and commits all or nothing: if any statement fails, the batch times out, or its statements together affect more rows than the affected-rows cap, everything is rolled back. " +
+        "Make each change as narrow as you can. A change over the cap runs in full before it is undone, holding locks while it runs and while it rolls back, so before a change that could touch many rows, count the matching rows with query first. " +
+        "Name objects in this database only: a name with a database or server part is refused. " +
+        "Returns committed: true and the rows each statement affected; any result sets are buffered and paged as for query.";
+
+    public const string CommandGuidance =
+        "Changes data on one database with INSERT, UPDATE, DELETE or MERGE. " +
+        "Every statement must be a command; anything else is refused before it reaches the database. " +
+        "UPDATE and DELETE need a WHERE clause that picks the rows to change. OUTPUT returns the changed rows. " +
+        WriteGuidance;
+
+    public const string DdlGuidance =
+        "Changes the schema of one database: tables, columns, constraints, indexes, views, schemas and sequences, and TRUNCATE TABLE. " +
+        "Procedures, functions, triggers, and users, roles and permissions can't be created or changed. A view's SELECT must be a valid query. " +
+        "Every statement must be ddl; anything else is refused before it reaches the database. " +
+        WriteGuidance;
+
+    public const string ExecuteGuidance =
+        "Runs an existing stored procedure on one database with EXEC, passing each parameter as a literal or NULL. " +
+        "System procedures (the sys schema, and names starting sp_ or xp_), dynamic SQL and EXEC of a string are refused. " +
+        "The procedure does whatever its code does, so run only procedures you understand. " +
+        "The affected-rows cap counts every row count the server reports, including rows a procedure's SELECT returns; a procedure that sets NOCOUNT ON reports none, so the cap can't see its changes. " +
+        WriteGuidance;
+
+    /// <summary>A write tool's guidance plus the affected-rows cap: the default, then any database it runs on whose cap differs.</summary>
+    public static string Write(string guidance, ToolGroup group, IEnumerable<EffectiveDatabase> databases)
+    {
+        var text = string.Create(CultureInfo.InvariantCulture, $"{guidance} Default affected-rows cap: {EffectiveLimits.Default.MaxAffectedRows} rows per batch.");
+        var others = databases
+            .Where(d => d.IsAllowed(group) && d.Limits.MaxAffectedRows != EffectiveLimits.Default.MaxAffectedRows)
+            .Select(d => string.Create(CultureInfo.InvariantCulture, $"{d.Identifier}: {d.Limits.MaxAffectedRows}"))
+            .ToList();
+        return others.Count == 0 ? text : $"{text} Databases with another cap: {string.Join("; ", others)}.";
+    }
 
     /// <summary>The query guidance plus the caps: the defaults, then any database whose limits differ.</summary>
     public static string Query(IEnumerable<EffectiveDatabase> databases)
@@ -47,8 +84,9 @@ internal static class ToolDescriptions
 }
 
 /// <summary>
-/// Builds the server's tool list (design D8). <c>list_databases</c> is always offered (2026-10-25 decision); the
-/// query tools only if <c>query</c> is allowed on at least one database. Every call still checks permission again.
+/// Builds the server's tool list (design D8, W7). <c>list_databases</c> is always offered (2026-10-25 decision). Each
+/// group's tool is offered only if that group is allowed on at least one database, and the paging tools whenever a
+/// tool that can return rows is (query, command or execute; ddl returns none). Every call still checks permission.
 /// </summary>
 internal static class ToolCatalog
 {
@@ -60,9 +98,26 @@ internal static class ToolCatalog
             Create(tools, nameof(SqlMcpTools.ListDatabases), ToolNames.ListDatabases, ToolDescriptions.ListDatabases),
         };
 
-        if (session.Databases.Any(d => d.IsAllowed(ToolGroup.Query)))
+        bool Offered(ToolGroup group) => session.Databases.Any(d => d.IsAllowed(group));
+
+        if (Offered(ToolGroup.Query))
         {
             list.Add(Create(tools, nameof(SqlMcpTools.Query), ToolNames.Query, ToolDescriptions.Query(session.Databases)));
+        }
+
+        var writes = new[]
+        {
+            (Group: ToolGroup.Command, Method: nameof(SqlMcpTools.Command), Name: ToolNames.Command, Guidance: ToolDescriptions.CommandGuidance),
+            (Group: ToolGroup.Ddl, Method: nameof(SqlMcpTools.Ddl), Name: ToolNames.Ddl, Guidance: ToolDescriptions.DdlGuidance),
+            (Group: ToolGroup.Execute, Method: nameof(SqlMcpTools.Execute), Name: ToolNames.Execute, Guidance: ToolDescriptions.ExecuteGuidance),
+        };
+        foreach (var write in writes.Where(w => Offered(w.Group)))
+        {
+            list.Add(Create(tools, write.Method, write.Name, ToolDescriptions.Write(write.Guidance, write.Group, session.Databases), readOnly: false));
+        }
+
+        if (Offered(ToolGroup.Query) || Offered(ToolGroup.Command) || Offered(ToolGroup.Execute))
+        {
             list.Add(Create(tools, nameof(SqlMcpTools.NextPage), ToolNames.NextPage, ToolDescriptions.NextPage));
             list.Add(Create(tools, nameof(SqlMcpTools.Abandon), ToolNames.Abandon, ToolDescriptions.Abandon));
         }
@@ -70,7 +125,11 @@ internal static class ToolCatalog
         return list;
     }
 
-    private static McpServerTool Create(SqlMcpTools target, string method, string name, string description) =>
+    /// <summary>
+    /// A write tool is annotated as not read-only, destructive and not idempotent: running a batch twice applies it
+    /// twice. No tool reaches outside the configured databases.
+    /// </summary>
+    private static McpServerTool Create(SqlMcpTools target, string method, string name, string description, bool readOnly = true) =>
         McpServerTool.Create(
             typeof(SqlMcpTools).GetMethod(method, BindingFlags.Instance | BindingFlags.Public)!,
             target,
@@ -78,8 +137,9 @@ internal static class ToolCatalog
             {
                 Name = name,
                 Description = description,
-                ReadOnly = true,
-                Destructive = false,
+                ReadOnly = readOnly,
+                Destructive = !readOnly,
+                Idempotent = readOnly ? null : false,
                 OpenWorld = false,
             });
 }
@@ -87,17 +147,38 @@ internal static class ToolCatalog
 /// <summary>The tool methods: thin wrappers that turn a <see cref="ToolResult"/> into an MCP result.</summary>
 internal sealed class SqlMcpTools(ToolPipeline pipeline)
 {
+    private const string DatabaseParameter = "The database identifier from list_databases, such as localhost:1433/app.";
+    private const string HandleParameter = "The handle from query, command or execute.";
+
     public CallToolResult ListDatabases() => ToCallResult(pipeline.ListDatabases());
 
     public async Task<CallToolResult> Query(
-        [Description("The database identifier from list_databases, such as localhost:1433/app.")] string database,
+        [Description(DatabaseParameter)] string database,
         [Description("The T-SQL query. Name the columns you need, filter with WHERE, and use TOP.")] string sql,
         CancellationToken cancellationToken) =>
         ToCallResult(await pipeline.QueryAsync(database, sql, cancellationToken).ConfigureAwait(false));
 
-    public CallToolResult NextPage([Description("The handle from query.")] string handle) => ToCallResult(pipeline.NextPage(handle));
+    public async Task<CallToolResult> Command(
+        [Description(DatabaseParameter)] string database,
+        [Description("The T-SQL INSERT, UPDATE, DELETE or MERGE statements. Keep each change as narrow as you can.")] string sql,
+        CancellationToken cancellationToken) =>
+        ToCallResult(await pipeline.CommandAsync(database, sql, cancellationToken).ConfigureAwait(false));
 
-    public CallToolResult Abandon([Description("The handle from query.")] string handle) => ToCallResult(pipeline.Abandon(handle));
+    public async Task<CallToolResult> Ddl(
+        [Description(DatabaseParameter)] string database,
+        [Description("The T-SQL schema statements: CREATE, ALTER or DROP of tables, indexes, views, schemas or sequences, or TRUNCATE TABLE.")] string sql,
+        CancellationToken cancellationToken) =>
+        ToCallResult(await pipeline.DdlAsync(database, sql, cancellationToken).ConfigureAwait(false));
+
+    public async Task<CallToolResult> Execute(
+        [Description(DatabaseParameter)] string database,
+        [Description("The EXEC statements, such as EXEC dbo.archive_orders @before = '2026-01-01'.")] string sql,
+        CancellationToken cancellationToken) =>
+        ToCallResult(await pipeline.ExecuteAsync(database, sql, cancellationToken).ConfigureAwait(false));
+
+    public CallToolResult NextPage([Description(HandleParameter)] string handle) => ToCallResult(pipeline.NextPage(handle));
+
+    public CallToolResult Abandon([Description(HandleParameter)] string handle) => ToCallResult(pipeline.Abandon(handle));
 
     private static CallToolResult ToCallResult(ToolResult result) => new()
     {
