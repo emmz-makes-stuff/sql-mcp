@@ -105,10 +105,13 @@ tool that would run it, or says that tool is denied on this database.
 **Writes** (`command`, `ddl` and `execute`) commit **all or nothing**:
 
 - The batch runs in one transaction, with `XACT_ABORT` on. If any statement fails or the batch times out, it is all
-  rolled back, and the agent is told nothing was committed.
+  rolled back, and the agent is told nothing was committed. The exceptions are a procedure that commits or rolls
+  back that transaction itself, and a commit that fails in flight. Then sql-mcp can't know what was kept, so the
+  agent is told to check with `query` before running it again.
 - **Affected-rows cap:** if the batch's statements together report more rows than `maxAffectedRows` (default
   1000), it is rolled back. The cap counts every row count the server reports, including rows a procedure's
-  `SELECT` returns. A procedure that sets `NOCOUNT ON` reports none, so the cap can't see its changes.
+  `SELECT` returns. A procedure that sets `NOCOUNT ON` reports none, so the cap can't see its changes. Nor do
+  `TRUNCATE TABLE` and `DROP`, so the cap doesn't limit them.
 - The result gives `committed: true` and the rows each statement affected. Any result sets (from `OUTPUT`, or a
   procedure's `SELECT`) are capped and paged like a query's. A result over the row or byte cap is truncated, but
   the batch still runs to completion and commits.
@@ -190,7 +193,8 @@ How the effective permissions are worked out:
 Every executed, denied or failed statement goes to a per-session JSON Lines audit log, in `.sql-mcp/logs/` (or
 `~/.local/state/sql-mcp/logs/` when the project has no `.sql-mcp/`). The log never holds result data. A write
 is logged as `executed` only once it is committed, with the rows each statement affected; a rolled-back write is
-logged as `failed`, with why (an error, a timeout, or the cap).
+logged as `failed`, with why (an error, a timeout, or the cap). A write whose outcome sql-mcp can't know is also
+logged as `failed`, with the kind `outcome_unknown`.
 
 ## Threat model
 

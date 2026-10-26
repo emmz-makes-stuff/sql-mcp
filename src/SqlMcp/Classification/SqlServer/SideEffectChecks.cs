@@ -5,7 +5,8 @@ namespace SqlMcp.Classification.SqlServer;
 
 /// <summary>
 /// Checks for nodes whose meaning depends on more than their type (design D6, W5): SELECT INTO and rowset functions
-/// everywhere; table hint kinds in a query; the WHERE and names rules in the write categories; and dynamic or
+/// everywhere; table hint kinds in a query; the WHERE rule and the names rule in writes (the names rule in a view's
+/// SELECT too); and dynamic or
 /// indirect EXEC. Returns a rejection reason, or null.
 /// </summary>
 internal static class SideEffectChecks
@@ -39,7 +40,11 @@ internal static class SideEffectChecks
         TableHintKind.PagLock,
     ];
 
-    public static string? Check(TSqlFragment node, StatementCategory category) => node switch
+    /// <param name="targetDatabaseOnly">
+    /// Whether the names rule applies: grants are per database, so a write, or a view's SELECT, may not reach another
+    /// database or server through a three- or four-part name. A query may.
+    /// </param>
+    public static string? Check(TSqlFragment node, StatementCategory category, bool targetDatabaseOnly) => node switch
     {
         SelectStatement { Into: not null } =>
             $"SELECT ... INTO {At(node)} creates a table, so it is not a query",
@@ -56,9 +61,9 @@ internal static class SideEffectChecks
             $"CREATE SCHEMA ... AUTHORIZATION {At(node)} sets the schema's owner, which is a security change",
         CreateSchemaStatement { StatementList.Statements.Count: > 0 } =>
             $"CREATE SCHEMA with objects in it {At(node)} is not supported: create the schema, then each object in its own statement",
-        SchemaObjectName name when IsWrite(category) && (name.DatabaseIdentifier is not null || name.ServerIdentifier is not null) =>
+        SchemaObjectName name when targetDatabaseOnly && (name.DatabaseIdentifier is not null || name.ServerIdentifier is not null) =>
             $"{OtherDatabase} {Dotted(name.Identifiers)} {At(node)} has a database or server part",
-        ColumnReferenceExpression { MultiPartIdentifier.Count: >= 4 } column when IsWrite(category) =>
+        ColumnReferenceExpression { MultiPartIdentifier.Count: >= 4 } column when targetDatabaseOnly =>
             $"{OtherDatabase} column {Dotted(column.MultiPartIdentifier.Identifiers)} {At(node)} has a database part",
         TableHint hint when category == StatementCategory.Query && !QueryHints.Contains(hint.HintKind) =>
             LockingHints.Contains(hint.HintKind)
@@ -84,9 +89,6 @@ internal static class SideEffectChecks
     };
 
     private const string OtherDatabase = "writes may only name objects in the target database:";
-
-    /// <summary>Grants are per database, so a write may not reach another one through a three- or four-part name.</summary>
-    private static bool IsWrite(StatementCategory category) => category is not StatementCategory.Query;
 
     /// <summary>
     /// A target that is a CTE of the same statement needs no WHERE: the CTE's query does the filtering (2026-10-26

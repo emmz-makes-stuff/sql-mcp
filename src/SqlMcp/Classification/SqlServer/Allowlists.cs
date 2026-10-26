@@ -91,8 +91,6 @@ internal static class Allowlists
         typeof(BooleanTernaryExpression),
         typeof(InPredicate),
         typeof(LikePredicate),
-        typeof(ExistsPredicate),
-        typeof(SubqueryComparisonPredicate),
     ];
 
     private static readonly HashSet<Type> Query =
@@ -161,7 +159,11 @@ internal static class Allowlists
         typeof(OptimizeForOptimizerHint),
 
         .. Scalars,
+
+        // Subqueries: a query may nest them, but a default, CHECK constraint or computed column may not.
         typeof(ScalarSubquery),
+        typeof(ExistsPredicate),
+        typeof(SubqueryComparisonPredicate),
     ];
 
     /// <summary>

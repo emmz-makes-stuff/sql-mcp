@@ -97,8 +97,9 @@ example below is a row in `ClassifierTable`.
     (`maxAffectedRows`) is the real backstop. The reason never suggests an always-true filter.
 - **Names rule:** a write may only name objects in the target database, because grants are given per database.
   In command, ddl and execute, a name with a database or server part (`INSERT INTO sales.dbo.orders …`,
-  `EXEC remote.app.dbo.p`), or a column reference of four or more parts, is rejected. Queries are unchanged, so
-  `SELECT a FROM otherdb.dbo.t` is still accepted, and so is a view's SELECT.
+  `EXEC remote.app.dbo.p`), or a column reference of four or more parts, is rejected. A view's SELECT keeps to the
+  target database too, because creating the view is a write: `CREATE VIEW dbo.v AS SELECT a FROM otherdb.dbo.t` is
+  rejected. Queries are unchanged, so `SELECT a FROM otherdb.dbo.t` is still accepted.
 - **System-procedure rule:** execute refuses the `sys` schema and any procedure whose name starts with `sp_` or
   `xp_`, ignoring case. That covers `EXEC sp_addrolemember 'db_owner', 'bob'`, `EXEC sys.sp_configure`,
   `EXEC xp_cmdshell 'dir'` and `EXEC SP_WHO`. A user procedure named `sp_…` is refused too, because SQL Server
@@ -118,7 +119,10 @@ An `execute` grant trusts the database's existing procedures (ADR-0002): the cla
 the procedure body. Two consequences:
 - A procedure that runs `SET NOCOUNT ON` hides its row counts, so the affected-rows cap can't see them.
 - A procedure that issues its own `ROLLBACK` or `COMMIT` can end the transaction that sql-mcp opened, so its
-  changes no longer depend on sql-mcp's all-or-nothing commit.
+  changes no longer depend on sql-mcp's all-or-nothing commit. sql-mcp notices this when SQL Server reports a
+  transaction-count mismatch (266) or a COMMIT or ROLLBACK with no transaction (3902, 3903), or when its own commit
+  finds the transaction gone. It then tells the agent that some of the batch may have been committed, and to check
+  with `query` before running it again.
 
 Grant `execute` only on databases whose procedures you trust.
 

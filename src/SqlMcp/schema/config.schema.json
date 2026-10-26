@@ -60,7 +60,7 @@
           "maximum": 2147483647
         },
         "maxAffectedRows": {
-          "description": "Most rows one write batch may affect before it is rolled back. Default 1000.",
+          "description": "Most rows one write batch may affect before it is rolled back. Default 1000. It counts the row counts the server reports, so TRUNCATE TABLE and DROP, which report none, aren't limited by it.",
           "type": "integer",
           "minimum": 1,
           "maximum": 2147483647

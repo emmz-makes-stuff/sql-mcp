@@ -268,6 +268,12 @@ internal static class ClassifierTable
         { "CREATE VIEW dbo.v AS SELECT * FROM dbo.t WITH (UPDLOCK)", "the view's SELECT is not a valid query" },
         { "CREATE VIEW dbo.v AS SELECT a FROM dbo.t WITH (UPDLOCK)", "UPDLOCK" },
         { "CREATE VIEW dbo.v AS SELECT * FROM OPENQUERY(lnk, 'SELECT 1')", "OPENQUERY" },
+
+        // Spec: a view keeps to the target database, though a query need not (code-review fix 10.2).
+        { "CREATE VIEW dbo.v AS SELECT a FROM otherdb.dbo.t", "writes may only name objects in the target database: otherdb.dbo.t" },
+        { "ALTER VIEW dbo.v AS SELECT a FROM lnk.otherdb.dbo.t", "writes may only name objects in the target database: lnk.otherdb.dbo.t" },
+        { "CREATE OR ALTER VIEW dbo.v AS SELECT t.a FROM dbo.t JOIN otherdb.dbo.u ON u.id = t.id", "otherdb.dbo.u" },
+        { "CREATE VIEW dbo.v AS SELECT a FROM dbo.t WHERE EXISTS (SELECT 1 FROM otherdb.dbo.u)", "otherdb.dbo.u" },
         { "CREATE TABLE otherdb.dbo.t (a int)", "writes may only name objects in the target database" },
 
         // ALTER INDEX takes no WITH options.

@@ -23,6 +23,17 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
 
     private const string NothingCommitted = WriteMessages.NothingCommitted;
 
+    private const string CheckBeforeRerun = WriteMessages.CheckBeforeRerun;
+
+    private const string EndedTransaction =
+        "a procedure ended sql-mcp's transaction with its own COMMIT or ROLLBACK, so some of the batch may have been committed, and sql-mcp can't undo it";
+
+    /// <summary>
+    /// 266: the transaction count changed across an EXEC. 3902 and 3903: a COMMIT or ROLLBACK with no transaction
+    /// left. Each means the batch's own statements ended sql-mcp's transaction (design Risks).
+    /// </summary>
+    private static readonly HashSet<int> TransactionEndedErrors = [266, 3902, 3903];
+
     public async Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, BatchMode mode, EffectiveLimits limits, CancellationToken cancellationToken)
     {
         var write = mode == BatchMode.Write;
@@ -102,13 +113,32 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
             if (write)
             {
                 // Not cancellable: a cancel that landed mid-commit would leave it unknown whether the change was kept,
-                // while the call is reported as failed.
-                await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
-                await transaction.DisposeAsync().ConfigureAwait(false);
+                // while the call is reported as failed. Once the commit returns, nothing can fail the call (the
+                // connection's disposal cleans up the transaction object).
+                try
+                {
+                    await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // SqlClient has seen the server end the transaction: a procedure committed or rolled back itself
+                    // and then began another, so the counts matched and no error was raised.
+                    return new QueryFailed(FailureKind.OutcomeUnknown, $"{EndedTransaction} ({ex.Message}) {CheckBeforeRerun}", null, null, null, Elapsed());
+                }
+                catch (SqlException ex)
+                {
+                    return Failed(FailureKind.OutcomeUnknown, $"the commit failed, so sql-mcp can't tell whether the batch was committed: {ex.Message} {CheckBeforeRerun}", ex, Elapsed());
+                }
+
                 transaction = null;
             }
 
             return new QuerySucceeded(result, Elapsed()) { RowsAffected = rowsAffected };
+        }
+        catch (SqlException ex) when (write && ex.Errors.Cast<SqlError>().Any(e => TransactionEndedErrors.Contains(e.Number)))
+        {
+            // Checked first: once the transaction has ended, neither the cap nor an error can roll the batch back.
+            return Failed(FailureKind.OutcomeUnknown, $"{EndedTransaction}: {ex.Message} {CheckBeforeRerun}", ex, Elapsed());
         }
         catch (SqlException) when (overCap)
         {

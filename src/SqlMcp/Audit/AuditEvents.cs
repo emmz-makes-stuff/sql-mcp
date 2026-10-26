@@ -40,6 +40,12 @@ internal enum FailureKind
 
     /// <summary>A write passed the database's affected-rows cap and was rolled back (design W4).</summary>
     AffectedRowsCap,
+
+    /// <summary>
+    /// A write whose outcome sql-mcp can't know: a procedure ended its transaction, or the commit itself failed. Some
+    /// of the batch may have been committed.
+    /// </summary>
+    OutcomeUnknown,
     Other,
 }
 

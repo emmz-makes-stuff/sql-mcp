@@ -246,6 +246,30 @@ public sealed class SqlServerWriteExecutorTests(SqlServerFixture db)
         Assert.Equal(0, await db.ScalarAsync("SELECT COUNT(*) FROM dbo.w_select_cap WHERE touched = 1"));
     }
 
+    /// <summary>
+    /// A procedure that commits or rolls back sql-mcp's transaction itself: in each case its insert is committed, so
+    /// the agent must not be told that nothing was (design Risks, code-review fix 10.1).
+    /// </summary>
+    [Theory]
+    [InlineData("w_commits", "BEGIN TRAN; INSERT INTO dbo.w_commits VALUES (1); COMMIT; COMMIT;", 266)]
+    [InlineData("w_rollback_write", "ROLLBACK; INSERT INTO dbo.w_rollback_write VALUES (2);", 266)]
+    [InlineData("w_recommit", "INSERT INTO dbo.w_recommit VALUES (3); COMMIT; BEGIN TRAN;", null)]
+    public async Task A_procedure_that_ends_the_transaction_leaves_the_outcome_unknown(string table, string body, int? errorNumber)
+    {
+        await db.ScalarAsync($"CREATE TABLE dbo.{table} (n int)");
+        await db.ScalarAsync($"CREATE PROCEDURE dbo.p_{table} AS BEGIN {body} END");
+
+        var outcome = await Write($"EXEC dbo.p_{table}");
+
+        var failed = Assert.IsType<QueryFailed>(outcome);
+        Assert.Equal(FailureKind.OutcomeUnknown, failed.Kind);
+        Assert.Equal(errorNumber, failed.ErrorNumber);
+        Assert.StartsWith("a procedure ended sql-mcp's transaction with its own COMMIT or ROLLBACK, so some of the batch may have been committed", failed.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Check with query before running it again.", failed.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("nothing was committed", failed.Message, StringComparison.Ordinal);
+        Assert.Equal(1, await db.ScalarAsync($"SELECT COUNT(*) FROM dbo.{table}"));
+    }
+
     private Task<QueryOutcome> Write(string sql, EffectiveLimits? limits = null) =>
         _executor.ExecuteAsync(db.ConnectionString, sql, BatchMode.Write, limits ?? EffectiveLimits.Default, Cancel);
 }

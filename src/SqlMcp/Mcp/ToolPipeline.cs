@@ -20,6 +20,23 @@ internal static class ToolNames
 }
 
 /// <summary>
+/// A tool that runs SQL: the one place that ties its name, statement category, permission group, batch mode and
+/// method together, and says whether it can return rows (so whether paging is offered with it).
+/// </summary>
+internal sealed record SqlTool(string Name, StatementCategory Category, ToolGroup Group, BatchMode Mode, bool ReturnsRows, string Method);
+
+internal static class SqlTools
+{
+    public static readonly SqlTool Query = new(ToolNames.Query, StatementCategory.Query, ToolGroup.Query, BatchMode.ReadOnly, ReturnsRows: true, nameof(SqlMcpTools.Query));
+    public static readonly SqlTool Command = new(ToolNames.Command, StatementCategory.Command, ToolGroup.Command, BatchMode.Write, ReturnsRows: true, nameof(SqlMcpTools.Command));
+    public static readonly SqlTool Ddl = new(ToolNames.Ddl, StatementCategory.Ddl, ToolGroup.Ddl, BatchMode.Write, ReturnsRows: false, nameof(SqlMcpTools.Ddl));
+    public static readonly SqlTool Execute = new(ToolNames.Execute, StatementCategory.Execute, ToolGroup.Execute, BatchMode.Write, ReturnsRows: true, nameof(SqlMcpTools.Execute));
+
+    /// <summary>In the order the catalog lists them.</summary>
+    public static readonly IReadOnlyList<SqlTool> All = [Query, Command, Ddl, Execute];
+}
+
+/// <summary>
 /// The checks every tool call goes through, in design D8's order:
 /// <c>audit ok? → resolve db → group allowed? → available? → classify → execute</c>.
 /// Permission and classification denials, executions and failures are audited. If an audit write fails, the call
@@ -39,24 +56,24 @@ internal sealed class ToolPipeline(SqlMcpSession session)
     }
 
     public Task<ToolResult> QueryAsync(string database, string sql, CancellationToken cancellationToken) =>
-        RunAsync(ToolNames.Query, StatementCategory.Query, BatchMode.ReadOnly, database, sql, cancellationToken);
+        RunAsync(SqlTools.Query, database, sql, cancellationToken);
 
     public Task<ToolResult> CommandAsync(string database, string sql, CancellationToken cancellationToken) =>
-        RunAsync(ToolNames.Command, StatementCategory.Command, BatchMode.Write, database, sql, cancellationToken);
+        RunAsync(SqlTools.Command, database, sql, cancellationToken);
 
     public Task<ToolResult> DdlAsync(string database, string sql, CancellationToken cancellationToken) =>
-        RunAsync(ToolNames.Ddl, StatementCategory.Ddl, BatchMode.Write, database, sql, cancellationToken);
+        RunAsync(SqlTools.Ddl, database, sql, cancellationToken);
 
     public Task<ToolResult> ExecuteAsync(string database, string sql, CancellationToken cancellationToken) =>
-        RunAsync(ToolNames.Execute, StatementCategory.Execute, BatchMode.Write, database, sql, cancellationToken);
+        RunAsync(SqlTools.Execute, database, sql, cancellationToken);
 
     /// <summary>
-    /// One flow for every tool that runs SQL, so each audits in the same order (design W7). The tool's group is its
-    /// category's. A write is logged <c>executed</c> only once the executor has committed it.
+    /// One flow for every tool that runs SQL, so each audits in the same order (design W7). A write is logged
+    /// <c>executed</c> only once the executor has committed it.
     /// </summary>
-    private async Task<ToolResult> RunAsync(
-        string tool, StatementCategory category, BatchMode mode, string database, string sql, CancellationToken cancellationToken)
+    private async Task<ToolResult> RunAsync(SqlTool sqlTool, string database, string sql, CancellationToken cancellationToken)
     {
+        var (tool, category, mode) = (sqlTool.Name, sqlTool.Category, sqlTool.Mode);
         if (Refusal() is { } refusal)
         {
             return refusal;
@@ -67,7 +84,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             return ToolResult.Error(DatabaseIdentity.UnknownIdentifierMessage(database, session.Databases.Select(d => d.Identifier)));
         }
 
-        var grant = db.Groups[CategoryGroups[category]];
+        var grant = db.Groups[sqlTool.Group];
         if (!grant.Allowed)
         {
             var reason = DenialReason(db, grant);
@@ -105,7 +122,8 @@ internal sealed class ToolPipeline(SqlMcpSession session)
         {
             // Executors report failures as outcomes, but anything that escapes one (a value no converter can read,
             // a connection option the platform can't use) must still be audited before the agent hears of it. The
-            // executor commits last, so an escaping write was rolled back.
+            // executor commits last and reports a failed commit itself, so an exception that escapes it came before
+            // the commit, and the write was rolled back.
             var elapsed = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             var failure = new FailedEvent(tool, db.Identifier, sql, FailureKind.Other, null, null, null, elapsed);
             var message = mode == BatchMode.Write ? $"{tool} failed: {ex.Message} {NothingCommitted}" : $"{tool} failed: {ex.Message}";
@@ -197,15 +215,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
     /// say whether the right tool would run there (design W6).
     /// </summary>
     private static HashSet<StatementCategory> AllowedCategories(EffectiveDatabase db) =>
-        CategoryGroups.Where(pair => db.IsAllowed(pair.Value)).Select(pair => pair.Key).ToHashSet();
-
-    private static readonly Dictionary<StatementCategory, ToolGroup> CategoryGroups = new()
-    {
-        [StatementCategory.Query] = ToolGroup.Query,
-        [StatementCategory.Command] = ToolGroup.Command,
-        [StatementCategory.Ddl] = ToolGroup.Ddl,
-        [StatementCategory.Execute] = ToolGroup.Execute,
-    };
+        SqlTools.All.Where(t => db.IsAllowed(t.Group)).Select(t => t.Category).ToHashSet();
 
     /// <summary>The refusal every database tool starts with: no audit log, or no usable config.</summary>
     private ToolResult? Refusal()

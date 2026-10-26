@@ -188,6 +188,7 @@ public sealed class ToolCatalogTests : IDisposable
 
         Assert.Contains("CREATE VIEW, ALTER VIEW, CREATE OR ALTER VIEW and CREATE SCHEMA must each be sent in a call of their own.", ddl, StringComparison.Ordinal);
         Assert.Contains("Returns committed: true. Default affected-rows cap", ddl, StringComparison.Ordinal);
+        Assert.Contains("TRUNCATE TABLE and DROP report no row count, so the affected-rows cap doesn't limit them.", ddl, StringComparison.Ordinal);
         Assert.DoesNotContain("result sets", ddl, StringComparison.Ordinal);
         Assert.DoesNotContain("rows each statement affected", ddl, StringComparison.Ordinal);
         Assert.Contains("any result sets are buffered and paged as for query", command, StringComparison.Ordinal);

@@ -130,6 +130,11 @@ public class ClassifierTests
     [Theory]
     [InlineData("CREATE VIEW dbo.v AS SELEC a FROM dbo.t")]
     [InlineData("CREATE TABLE dbo.t (a int; CREATE INDEX ix ON dbo.t (a)")]
+
+    // CREATE VIEW here is a permission, not a statement (code-review fix 10.3).
+    [InlineData("GRANT CREATE VIEW TO u; SELEC 1")]
+    [InlineData("DENY ALTER, CREATE VIEW TO u; SELEC 1")]
+    [InlineData("REVOKE CREATE SCHEMA FROM u; SELEC 1")]
     public void Other_syntax_errors_have_no_hint(string sql)
     {
         var verdict = _classifier.Classify(sql).ForTool(StatementCategory.Ddl, AllTools);

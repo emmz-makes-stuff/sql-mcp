@@ -83,7 +83,7 @@ An `execute` statement SHALL be accepted only for a procedure outside the `sys` 
 - **THEN** each is rejected, with a reason saying system and extended procedures can't be run
 
 ### Requirement: Writes stay in the target database
-A `command`, `ddl` or `execute` statement SHALL be rejected if it names an object with a database or server part (a three- or four-part name), because grants are given per database.
+A `command`, `ddl` or `execute` statement SHALL be rejected if it names an object with a database or server part (a three- or four-part name), because grants are given per database. This includes the SELECT of a view created or altered through `ddl`, even though the same SELECT is accepted by `query`.
 
 #### Scenario: Write to another database
 - **WHEN** the command tool is given `INSERT INTO sales.dbo.orders (id) VALUES (1)` for the database `localhost:1433/app`
@@ -92,6 +92,10 @@ A `command`, `ddl` or `execute` statement SHALL be rejected if it names an objec
 #### Scenario: Linked server procedure
 - **WHEN** the execute tool is given `EXEC remote.app.dbo.p`
 - **THEN** it is rejected
+
+#### Scenario: View reading another database
+- **WHEN** the ddl tool is given `CREATE VIEW dbo.v AS SELECT a FROM otherdb.dbo.t`
+- **THEN** it is rejected, with a reason saying that writes may only name objects in the target database
 
 ## REMOVED Requirements
 

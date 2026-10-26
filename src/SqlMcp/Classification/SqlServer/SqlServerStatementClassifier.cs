@@ -63,7 +63,10 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
             .ToHashSet();
         for (var i = 0; i < words.Count; i++)
         {
-            if (OwnCallStatement(words, i) is { } name
+            // After GRANT, DENY, REVOKE or a comma, CREATE VIEW names a permission, not a statement.
+            var permission = i > 0 && words[i - 1].TokenType is TSqlTokenType.Grant or TSqlTokenType.Deny or TSqlTokenType.Revoke or TSqlTokenType.Comma;
+            if (!permission
+                && OwnCallStatement(words, i) is { } name
                 && (i > 0 || errors.Any(e => e.Offset > words[i].Offset && statementStarts.Contains(e.Offset))))
             {
                 return $"{name} must be the only statement in its call: send it on its own";
@@ -93,7 +96,7 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
             return Rejected(number, statement, Phrases.Unsupported(statement));
         }
 
-        var visitor = new AllowlistVisitor(category);
+        var visitor = new AllowlistVisitor(category, targetDatabaseOnly: category is not StatementCategory.Query);
         statement.Accept(visitor);
         return visitor.Rejection is { } reason
             ? Rejected(number, statement, reason)
@@ -107,7 +110,7 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
     /// Visits every node: <see cref="TSqlFragmentVisitor"/> calls <see cref="Visit(TSqlFragment)"/> for each one,
     /// whatever its concrete type. The first failure is kept.
     /// </summary>
-    private sealed class AllowlistVisitor(StatementCategory category) : TSqlFragmentVisitor
+    private sealed class AllowlistVisitor(StatementCategory category, bool targetDatabaseOnly) : TSqlFragmentVisitor
     {
         public string? Rejection { get; private set; }
 
@@ -118,7 +121,7 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
                 return;
             }
 
-            Rejection = SideEffectChecks.Check(node, category);
+            Rejection = SideEffectChecks.Check(node, category, targetDatabaseOnly);
             if (Rejection is null && !Allowlists.For(category).Contains(node.GetType()))
             {
                 Rejection = $"{Phrases.For(node)} {SideEffectChecks.At(node)} is not allowed in {category.ToName()} statements";
@@ -126,8 +129,9 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
         }
 
         /// <summary>
-        /// A view's SELECT is checked as a query (design W5), so a view can't hide what a query couldn't do. In DDL a
-        /// SELECT statement only appears as a view's body.
+        /// A view's SELECT is checked as a query (design W5), so a view can't hide what a query couldn't do. Creating a
+        /// view is a write, so its SELECT also keeps to the target database, which a query need not (code-review fix
+        /// 10.2). In DDL a SELECT statement only appears as a view's body.
         /// </summary>
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -137,12 +141,22 @@ internal sealed class SqlServerStatementClassifier : IStatementClassifier
                 return;
             }
 
-            if (Rejection is null)
+            if (Rejection is not null)
             {
-                var query = new AllowlistVisitor(StatementCategory.Query);
-                node.Accept(query);
-                Rejection = query.Rejection is { } reason ? $"the view's SELECT is not a valid query: {reason}" : null;
+                return;
             }
+
+            var query = new AllowlistVisitor(StatementCategory.Query, targetDatabaseOnly: false);
+            node.Accept(query);
+            if (query.Rejection is { } reason)
+            {
+                Rejection = $"the view's SELECT is not a valid query: {reason}";
+                return;
+            }
+
+            var names = new AllowlistVisitor(StatementCategory.Query, targetDatabaseOnly: true);
+            node.Accept(names);
+            Rejection = names.Rejection;
         }
     }
 }

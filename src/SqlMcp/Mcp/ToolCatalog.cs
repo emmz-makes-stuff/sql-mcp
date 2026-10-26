@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Reflection;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using SqlMcp.Classification;
 using SqlMcp.Execution;
 using SqlMcp.Permissions;
 
@@ -48,6 +49,7 @@ internal static class ToolDescriptions
         "Procedures, functions, triggers, and users, roles and permissions can't be created or changed. A view's SELECT must be a valid query. " +
         "Every statement must be ddl; anything else is refused before it reaches the database. " +
         "CREATE VIEW, ALTER VIEW, CREATE OR ALTER VIEW and CREATE SCHEMA must each be sent in a call of their own. " +
+        "TRUNCATE TABLE and DROP report no row count, so the affected-rows cap doesn't limit them. " +
         WriteGuidance + "Returns committed: true.";
 
     public const string ExecuteGuidance =
@@ -102,25 +104,13 @@ internal static class ToolCatalog
             Create(tools, nameof(SqlMcpTools.ListDatabases), ToolNames.ListDatabases, ToolDescriptions.ListDatabases),
         };
 
-        bool Offered(ToolGroup group) => session.Databases.Any(d => d.IsAllowed(group));
-
-        if (Offered(ToolGroup.Query))
+        var offered = SqlTools.All.Where(t => session.Databases.Any(d => d.IsAllowed(t.Group))).ToList();
+        foreach (var tool in offered)
         {
-            list.Add(Create(tools, nameof(SqlMcpTools.Query), ToolNames.Query, ToolDescriptions.Query(session.Databases)));
+            list.Add(Create(tools, tool.Method, tool.Name, Describe(tool, session.Databases), readOnly: tool.Mode == BatchMode.ReadOnly));
         }
 
-        var writes = new[]
-        {
-            (Group: ToolGroup.Command, Method: nameof(SqlMcpTools.Command), Name: ToolNames.Command, Guidance: ToolDescriptions.CommandGuidance),
-            (Group: ToolGroup.Ddl, Method: nameof(SqlMcpTools.Ddl), Name: ToolNames.Ddl, Guidance: ToolDescriptions.DdlGuidance),
-            (Group: ToolGroup.Execute, Method: nameof(SqlMcpTools.Execute), Name: ToolNames.Execute, Guidance: ToolDescriptions.ExecuteGuidance),
-        };
-        foreach (var write in writes.Where(w => Offered(w.Group)))
-        {
-            list.Add(Create(tools, write.Method, write.Name, ToolDescriptions.Write(write.Guidance, write.Group, session.Databases), readOnly: false));
-        }
-
-        if (Offered(ToolGroup.Query) || Offered(ToolGroup.Command) || Offered(ToolGroup.Execute))
+        if (offered.Any(t => t.ReturnsRows))
         {
             list.Add(Create(tools, nameof(SqlMcpTools.NextPage), ToolNames.NextPage, ToolDescriptions.NextPage));
             list.Add(Create(tools, nameof(SqlMcpTools.Abandon), ToolNames.Abandon, ToolDescriptions.Abandon));
@@ -128,6 +118,15 @@ internal static class ToolCatalog
 
         return list;
     }
+
+    private static string Describe(SqlTool tool, IReadOnlyList<EffectiveDatabase> databases) => tool.Category switch
+    {
+        StatementCategory.Query => ToolDescriptions.Query(databases),
+        StatementCategory.Command => ToolDescriptions.Write(ToolDescriptions.CommandGuidance, tool.Group, databases),
+        StatementCategory.Ddl => ToolDescriptions.Write(ToolDescriptions.DdlGuidance, tool.Group, databases),
+        StatementCategory.Execute => ToolDescriptions.Write(ToolDescriptions.ExecuteGuidance, tool.Group, databases),
+        _ => throw new ArgumentOutOfRangeException(nameof(tool), tool.Category, "No tool runs this category."),
+    };
 
     /// <summary>
     /// A write tool is annotated as not read-only, destructive and not idempotent: running a batch twice applies it

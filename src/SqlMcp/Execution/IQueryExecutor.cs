@@ -30,6 +30,9 @@ internal enum BatchMode
 internal static class WriteMessages
 {
     public const string NothingCommitted = "The batch was rolled back, so nothing was committed.";
+
+    /// <summary>Ends every message where sql-mcp can't tell whether a write was committed.</summary>
+    public const string CheckBeforeRerun = "Check with query before running it again.";
 }
 
 internal abstract record QueryOutcome(TimeSpan Duration);

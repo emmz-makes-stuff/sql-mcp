@@ -570,6 +570,24 @@ public sealed class ToolPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task A_write_whose_outcome_is_unknown_is_not_reported_as_rolled_back()
+    {
+        _builder.User(AllWrites);
+        _builder.Executor.Outcome = new QueryFailed(
+            FailureKind.OutcomeUnknown, "a procedure ended sql-mcp's transaction … Check with query before running it again.", 266, 16, 2, TimeSpan.Zero);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).ExecuteAsync(Sales, "EXEC dbo.p", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("a procedure ended sql-mcp's transaction … Check with query before running it again.", result.Text);
+        var failed = SessionBuilder.Events(session).Single(e => e["event"]!.GetValue<string>() == "failed");
+        Assert.Equal("execute", failed["tool"]!.GetValue<string>());
+        Assert.Equal("outcome_unknown", failed["kind"]!.GetValue<string>());
+        Assert.Equal(266, failed["error_number"]!.GetValue<int>());
+    }
+
+    [Fact]
     public async Task An_escaping_exception_in_a_write_says_nothing_was_committed()
     {
         _builder.User(AllWrites);
