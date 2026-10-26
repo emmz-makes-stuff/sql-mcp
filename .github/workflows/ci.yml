@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          # An exact version, not global.json: a channel install follows an aka.ms link to a storage origin
+          # that refuses public reads (409 PublicAccessNotPermitted). Keep it in global.json's 10.0.4xx band.
+          dotnet-version: 10.0.403
+
+      # The same Makefile targets as locally, so the logs show each LABEL_EXIT line.
+      # `validate` needs openspec and checks the plan, not the code, so it stays local.
+      - run: make build
+      - run: make format
+      - run: make test
+      # Testcontainers starts SQL Server 2025 on the runner's Docker daemon.
+      - run: make itest

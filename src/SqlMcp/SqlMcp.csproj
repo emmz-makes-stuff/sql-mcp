@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sql-mcp</ToolCommandName>
+    <PackageId>Emmz.SqlMcp</PackageId>
+    <Description>An MCP server that gives coding agents controlled, audited access to SQL databases.</Description>
+    <PackageTags>mcp;sql;sqlserver;ai;agents</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Authors>Emmz</Authors>
+    <PackageProjectUrl>https://github.com/emmz-makes-stuff/sql-mcp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/emmz-makes-stuff/sql-mcp</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Tomlyn" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="schema/config.schema.json" LogicalName="SqlMcp.config.schema.json" />
+    <None Include="schema/config.schema.json" Pack="true" PackagePath="schema/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SqlMcp.Tests" />
+    <InternalsVisibleTo Include="SqlMcp.IntegrationTests" />
+  </ItemGroup>
+
+</Project>
