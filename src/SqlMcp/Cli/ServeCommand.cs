@@ -8,6 +8,7 @@ using SqlMcp.Audit;
 using SqlMcp.Classification.SqlServer;
 using SqlMcp.Configuration;
 using SqlMcp.Execution.SqlServer;
+using SqlMcp.Introspection.SqlServer;
 using SqlMcp.Mcp;
 
 namespace SqlMcp.Cli;
@@ -39,7 +40,7 @@ internal static class ServeCommand
         var audit = AuditLog.Open(paths.ProjectDirectory, AuditLog.FallbackDirectoryForCurrentUser(), time, Environment.ProcessId);
         var engines = new Dictionary<Engine, EngineServices>
         {
-            [Engine.SqlServer] = new(new SqlServerStatementClassifier(), new SqlServerQueryExecutor(time)),
+            [Engine.SqlServer] = new(new SqlServerStatementClassifier(), new SqlServerQueryExecutor(time), new SqlServerCatalogReader(time)),
         };
         using var session = SqlMcpSession.Load(paths, Environment.GetEnvironmentVariable, audit, time, engines, Version);
 

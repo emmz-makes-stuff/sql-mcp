@@ -54,7 +54,7 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "next_page", "abandon"], Names(session));
+        Assert.Equal(["list_databases", "query", "next_page", "abandon", "list_objects"], Names(session));
     }
 
     [Fact]
@@ -69,8 +69,8 @@ public sealed class ToolCatalogTests : IDisposable
     [Fact]
     public void No_database_allows_query()
     {
-        // list_databases is always offered (2026-10-25 decision); the query tools are not.
-        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        // list_databases is always offered (2026-10-25 decision); the query and introspection tools are not.
+        _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
         Assert.Equal(["list_databases"], Names(session));
@@ -156,13 +156,56 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User(AllWrites);
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon"], Names(session));
+        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon", "list_objects"], Names(session));
+    }
+
+    [Fact]
+    public void Introspection_alone_offers_list_objects_without_paging()
+    {
+        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        Assert.Equal(["list_databases", "list_objects"], Names(session));
+    }
+
+    [Fact]
+    public void List_objects_is_not_offered_when_introspection_is_denied_everywhere()
+    {
+        _builder.User("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" }, { "connectionString": "Server=other;Database=Hr" } ] }""");
+        using var session = _builder.Build();
+
+        Assert.DoesNotContain(ToolNames.ListObjects, Names(session));
+    }
+
+    [Fact]
+    public void List_objects_is_offered_when_one_database_allows_introspection()
+    {
+        _builder.User("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["introspection"] }, { "connectionString": "Server=other;Database=Hr" } ] }""");
+        using var session = _builder.Build();
+
+        Assert.Contains(ToolNames.ListObjects, Names(session));
+    }
+
+    [Fact]
+    public void Agent_reads_the_list_objects_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var listObjects = Tool(session, ToolNames.ListObjects);
+
+        Assert.True(listObjects.Annotations?.ReadOnlyHint);
+        Assert.False(listObjects.Annotations?.DestructiveHint);
+        Assert.False(listObjects.Annotations?.OpenWorldHint);
+        Assert.Contains("a name pattern where * matches any characters and ? one character", listObjects.Description, StringComparison.Ordinal);
+        Assert.Contains("Only objects the database login can see are shown", listObjects.Description, StringComparison.Ordinal);
+        Assert.Contains("filter further", listObjects.Description, StringComparison.Ordinal);
     }
 
     [Fact]
     public void Paging_is_offered_with_command_alone()
     {
-        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
+        _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
         using var session = _builder.Build();
 
         Assert.Equal(["list_databases", "command", "next_page", "abandon"], Names(session));
@@ -171,7 +214,7 @@ public sealed class ToolCatalogTests : IDisposable
     [Fact]
     public void Ddl_alone_returns_no_rows_so_paging_is_not_offered()
     {
-        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["ddl"] } ] }""");
+        _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["ddl"] } ] }""");
         using var session = _builder.Build();
 
         Assert.Equal(["list_databases", "ddl"], Names(session));

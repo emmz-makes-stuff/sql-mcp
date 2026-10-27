@@ -16,11 +16,11 @@ public class AuditEventShapeTests
         "Tool", "Database", "Sql", "Classification", "DurationMs", "Rows", "Truncated", "RowsAffected",
         "Reason", "Source",
         "Kind", "ErrorNumber", "Severity", "State", "Cap", "Affected",
-        "Target",
+        "Request", "Succeeded",
     ];
 
     private static readonly HashSet<Type> AllowedTypes =
-        [typeof(string), typeof(int), typeof(int?), typeof(long), typeof(long?), typeof(bool), typeof(IReadOnlyList<string>), typeof(IReadOnlyList<int>), typeof(FailureKind)];
+        [typeof(string), typeof(int), typeof(int?), typeof(long), typeof(long?), typeof(bool), typeof(IReadOnlyList<string>), typeof(IReadOnlyList<int>), typeof(FailureKind), typeof(FailureKind?)];
 
     public static TheoryData<string> EventTypes => new(
         typeof(AuditEvent).Assembly.GetTypes()
@@ -90,6 +90,7 @@ public class AuditEventShapeTests
         new DeniedEvent("query", "sqlhost:1433/sales", "DELETE FROM users", "classified as command; use the command tool"),
         new FailedEvent("query", "sqlhost:1433/sales", "SELECT CAST(email AS int) FROM users", FailureKind.Sql, 245, 16, 1, 1),
         new FailedEvent("command", "sqlhost:1433/sales", "UPDATE users SET email = 'x' WHERE id > 0", FailureKind.AffectedRowsCap, null, null, null, 1) { Cap = 1000, Affected = 5000 },
-        new IntrospectionEvent("describe", "sqlhost:1433/sales", "dbo.users"),
+        new IntrospectionEvent("list_objects", "sqlhost:1433/sales", ["schema=dbo", "pattern=user*"], 1, Succeeded: true),
+        new IntrospectionEvent("list_objects", "sqlhost:1433/sales", [], 1, Succeeded: false) { Kind = FailureKind.Timeout, ErrorNumber = -2 },
     ];
 }

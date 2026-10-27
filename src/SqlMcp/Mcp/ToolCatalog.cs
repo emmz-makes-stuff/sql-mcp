@@ -28,6 +28,16 @@ internal static class ToolDescriptions
     public const string Abandon =
         "Releases a result handle and its buffered rows, when you don't need the remaining pages.";
 
+    /// <summary>What every introspection tool's description says about visibility (spec: introspection tool descriptions).</summary>
+    private const string VisibilityGuidance =
+        "Only objects the database login can see are shown, so a login without permission to view an object's definition may see less than the database holds.";
+
+    public const string ListObjects =
+        "Lists the user objects in one database: tables, views, procedures, functions, triggers, sequences, synonyms, types and table types, with each one's schema, name and type, and an approximate row count for tables. " +
+        "Use it to find objects without writing catalog queries. Narrow the list with a schema, one or more types, and a name pattern where * matches any characters and ? one character; matching ignores case. " +
+        "The list is capped at the database's row cap; past it, the result is truncated and gives the total, and you should filter further. " +
+        VisibilityGuidance;
+
     /// <summary>What every write tool's description says about the transaction and the cap (spec: write tool descriptions).</summary>
     private const string WriteGuidance =
         "The batch runs in one transaction and commits all or nothing: if any statement fails, the batch times out, or its statements together affect more rows than the affected-rows cap, everything is rolled back. " +
@@ -116,6 +126,12 @@ internal static class ToolCatalog
             list.Add(Create(tools, nameof(SqlMcpTools.Abandon), ToolNames.Abandon, ToolDescriptions.Abandon));
         }
 
+        // The introspection tools return no result handles, so they never bring the paging tools with them.
+        if (session.Databases.Any(d => d.IsAllowed(ToolGroup.Introspection)))
+        {
+            list.Add(Create(tools, nameof(SqlMcpTools.ListObjects), ToolNames.ListObjects, ToolDescriptions.ListObjects));
+        }
+
         return list;
     }
 
@@ -178,6 +194,14 @@ internal sealed class SqlMcpTools(ToolPipeline pipeline)
         [Description("The EXEC statements, such as EXEC dbo.archive_orders @before = '2026-01-01'.")] string sql,
         CancellationToken cancellationToken) =>
         ToCallResult(await pipeline.ExecuteAsync(database, sql, cancellationToken).ConfigureAwait(false));
+
+    public async Task<CallToolResult> ListObjects(
+        [Description(DatabaseParameter)] string database,
+        [Description("Only objects in this schema, such as dbo. Optional.")] string? schema = null,
+        [Description("Only objects of these types: table, view, procedure, function, trigger, sequence, synonym, type, table_type. Optional.")] string[]? types = null,
+        [Description("Only objects whose names match this pattern: * matches any characters, ? one character, ignoring case, such as order*. Optional.")] string? pattern = null,
+        CancellationToken cancellationToken = default) =>
+        ToCallResult(await pipeline.ListObjectsAsync(database, schema, types, pattern, cancellationToken).ConfigureAwait(false));
 
     public CallToolResult NextPage([Description(HandleParameter)] string handle) => ToCallResult(pipeline.NextPage(handle));
 

@@ -3,6 +3,7 @@ using SqlMcp.Audit;
 using SqlMcp.Classification.SqlServer;
 using SqlMcp.Configuration;
 using SqlMcp.Execution;
+using SqlMcp.Introspection;
 using SqlMcp.Mcp;
 using SqlMcp.Permissions;
 
@@ -41,9 +42,40 @@ internal sealed class FakeExecutor : IQueryExecutor
     }
 }
 
+/// <summary>A catalog reader that records the filters it was given and returns a canned outcome.</summary>
+internal sealed class FakeCatalogReader : ICatalogReader
+{
+    public List<ObjectFilter> Lists { get; } = [];
+
+    public CatalogOutcome<ObjectList> ListOutcome { get; set; } =
+        new CatalogSucceeded<ObjectList>(new ObjectList([], 0, false), TimeSpan.FromMilliseconds(4));
+
+    /// <summary>When set, the call is cancelled as if the client gave up while the catalog was read.</summary>
+    public bool Cancels { get; set; }
+
+    /// <summary>When set, the call throws this, as a reader bug would.</summary>
+    public Exception? Throws { get; set; }
+
+    public Task<CatalogOutcome<ObjectList>> ListAsync(string connectionString, ObjectFilter filter, EffectiveLimits limits, CancellationToken cancellationToken)
+    {
+        Lists.Add(filter);
+        return Respond(ListOutcome);
+    }
+
+    private Task<CatalogOutcome<T>> Respond<T>(CatalogOutcome<T> outcome)
+    {
+        if (Throws is not null)
+        {
+            return Task.FromException<CatalogOutcome<T>>(Throws);
+        }
+
+        return Cancels ? Task.FromCanceled<CatalogOutcome<T>>(new CancellationToken(canceled: true)) : Task.FromResult(outcome);
+    }
+}
+
 /// <summary>
-/// A <see cref="SqlMcpSession"/> over temp user and project directories, the real classifier, a fake executor, and
-/// an audit log in the project's <c>.sql-mcp/logs/</c>.
+/// A <see cref="SqlMcpSession"/> over temp user and project directories, the real classifier, a fake executor, a
+/// fake catalog reader, and an audit log in the project's <c>.sql-mcp/logs/</c>.
 /// </summary>
 internal sealed class SessionBuilder : IDisposable
 {
@@ -51,6 +83,8 @@ internal sealed class SessionBuilder : IDisposable
     private readonly Dictionary<string, string> _environment = new(StringComparer.Ordinal);
 
     public FakeExecutor Executor { get; } = new();
+
+    public FakeCatalogReader Catalog { get; } = new();
 
     public FakeTime Time { get; } = new(new DateTimeOffset(2026, 10, 25, 18, 40, 0, TimeSpan.Zero));
 
@@ -78,7 +112,7 @@ internal sealed class SessionBuilder : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, "project", ".sql-mcp"));
         var audit = AuditLog.Open(Paths.ProjectDirectory, Path.Combine(_temp.Path, "fallback"), Time, 4242);
-        var engines = new Dictionary<Engine, EngineServices> { [Engine.SqlServer] = new(new SqlServerStatementClassifier(), Executor) };
+        var engines = new Dictionary<Engine, EngineServices> { [Engine.SqlServer] = new(new SqlServerStatementClassifier(), Executor, Catalog) };
         return SqlMcpSession.Load(Paths, name => _environment.GetValueOrDefault(name), audit, Time, engines, "1.2.3-test");
     }
 

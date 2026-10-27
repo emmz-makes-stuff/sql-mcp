@@ -198,7 +198,7 @@ public sealed class AuditLogTests : IDisposable
     {
         using var log = Open();
 
-        Parallel.For(0, 200, i => log.Write(new IntrospectionEvent("describe", "sqlhost:1433/sales", $"dbo.t{i}")));
+        Parallel.For(0, 200, i => log.Write(new IntrospectionEvent("list_objects", "sqlhost:1433/sales", [$"pattern=t{i}"], i, Succeeded: true)));
 
         Assert.Equal(200, Lines(log).Count);
     }

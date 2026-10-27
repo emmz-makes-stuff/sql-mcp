@@ -65,7 +65,7 @@ public sealed class ServeTests : IAsyncLifetime
 
         var tools = await client.ListToolsAsync(cancellationToken: Cancel);
 
-        Assert.Equal(["abandon", "list_databases", "next_page", "query"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["abandon", "list_databases", "list_objects", "next_page", "query"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
         Assert.Equal("sql-mcp", client.ServerInfo?.Name);
     }
 
@@ -165,7 +165,7 @@ public sealed class ServeTests : IAsyncLifetime
         var client = await Connect();
 
         var tools = await client.ListToolsAsync(cancellationToken: Cancel);
-        Assert.Equal(["abandon", "command", "ddl", "execute", "list_databases", "next_page", "query"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["abandon", "command", "ddl", "execute", "list_databases", "list_objects", "next_page", "query"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
 
         var created = await Write(client, "ddl", $"CREATE TABLE dbo.{pets} (id int PRIMARY KEY, name nvarchar(50))");
         Assert.Equal("[]", created["rows_affected"]!.ToJsonString());

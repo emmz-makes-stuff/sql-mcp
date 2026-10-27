@@ -3,6 +3,7 @@ using SqlMcp.Audit;
 using SqlMcp.Classification;
 using SqlMcp.Configuration;
 using SqlMcp.Execution;
+using SqlMcp.Introspection;
 using SqlMcp.Permissions;
 
 namespace SqlMcp.Mcp;
@@ -17,6 +18,7 @@ internal static class ToolNames
     public const string Execute = "execute";
     public const string NextPage = "next_page";
     public const string Abandon = "abandon";
+    public const string ListObjects = "list_objects";
 }
 
 /// <summary>
@@ -66,6 +68,103 @@ internal sealed class ToolPipeline(SqlMcpSession session)
 
     public Task<ToolResult> ExecuteAsync(string database, string sql, CancellationToken cancellationToken) =>
         RunAsync(SqlTools.Execute, database, sql, cancellationToken);
+
+    public Task<ToolResult> ListObjectsAsync(string database, string? schema, IReadOnlyList<string>? types, string? pattern, CancellationToken cancellationToken)
+    {
+        if (!ObjectTypes.TryParseAll(types, out var parsed, out var error))
+        {
+            return Task.FromResult(ToolResult.Error(error!));
+        }
+
+        var filter = new ObjectFilter(Blank(schema), parsed, Blank(pattern));
+        return RunIntrospectionAsync(
+            ToolNames.ListObjects,
+            database,
+            filter.Describe(),
+            (reader, connectionString, limits, token) => reader.ListAsync(connectionString, filter, limits, token),
+            list => ToolResult.Ok(ObjectListResponse.From(list)),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// The flow every introspection tool shares, in the order <see cref="RunAsync"/> uses (design I7):
+    /// <c>audit ok? → resolve db → introspection allowed? → available? → read → audit → respond</c>. There's no
+    /// classifier step: the reader runs fixed catalog queries, never the agent's SQL. A call that reads the catalog
+    /// is logged as one <c>introspection</c> event, succeeded or not.
+    /// </summary>
+    private async Task<ToolResult> RunIntrospectionAsync<T>(
+        string tool,
+        string database,
+        IReadOnlyList<string> request,
+        Func<ICatalogReader, string, EffectiveLimits, CancellationToken, Task<CatalogOutcome<T>>> read,
+        Func<T, ToolResult> respond,
+        CancellationToken cancellationToken)
+    {
+        if (Refusal() is { } refusal)
+        {
+            return refusal;
+        }
+
+        if (Find(database) is not { } db)
+        {
+            return ToolResult.Error(DatabaseIdentity.UnknownIdentifierMessage(database, session.Databases.Select(d => d.Identifier)));
+        }
+
+        var grant = db.Groups[ToolGroup.Introspection];
+        if (!grant.Allowed)
+        {
+            var reason = DenialReason(db, grant);
+            return Audited(new DeniedEvent(tool, db.Identifier, null, reason, grant.Source.ToDisplayName()), ToolResult.Error(reason));
+        }
+
+        if (!db.Entry.IsAvailable)
+        {
+            return ToolResult.Error($"{db.Identifier} is unavailable: {db.Entry.UnavailableReason}");
+        }
+
+        var reader = session.Engines[db.Entry.Engine].CatalogReader;
+        CatalogOutcome<T> outcome;
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            outcome = await read(reader, db.Entry.ConnectionString!, db.Limits, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            session.Audit.Write(Failed(FailureKind.Other, null));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // As in RunAsync: anything that escapes the reader is still audited before the agent hears of it.
+            return Audited(Failed(FailureKind.Other, null), ToolResult.Error($"{tool} failed: {ex.Message}"));
+        }
+
+        return outcome switch
+        {
+            CatalogSucceeded<T> succeeded => Audited(
+                new IntrospectionEvent(tool, db.Identifier, request, (long)succeeded.Duration.TotalMilliseconds, Succeeded: true),
+                respond(succeeded.Value)),
+            CatalogFailed<T> failed => Audited(
+                new IntrospectionEvent(tool, db.Identifier, request, (long)failed.Duration.TotalMilliseconds, Succeeded: false)
+                {
+                    Kind = failed.Kind,
+                    ErrorNumber = failed.ErrorNumber,
+                },
+                ToolResult.Error(failed.Message)),
+            _ => throw new InvalidOperationException($"Unexpected outcome {outcome.GetType().Name}."),
+        };
+
+        IntrospectionEvent Failed(FailureKind kind, int? errorNumber) =>
+            new(tool, db.Identifier, request, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, Succeeded: false)
+            {
+                Kind = kind,
+                ErrorNumber = errorNumber,
+            };
+    }
+
+    /// <summary>An optional text argument: blank or whitespace means "not given".</summary>
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
     /// One flow for every tool that runs SQL, so each audits in the same order (design W7). A write is logged

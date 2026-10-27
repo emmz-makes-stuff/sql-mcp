@@ -70,5 +70,20 @@ internal sealed record FailedEvent(
     public long? Affected { get; init; }
 }
 
-/// <summary>An introspection call (used by the introspection change). <see cref="Target"/> is an object name.</summary>
-internal sealed record IntrospectionEvent(string Tool, string Database, string? Target) : AuditEvent("introspection");
+/// <summary>
+/// An introspection call that ran (introspection design I7). <see cref="Request"/> is what was asked for: the
+/// filters as <c>name=value</c> entries, or object names. Never the objects, columns or definitions returned.
+/// A failure keeps only its kind and error number, as <see cref="FailedEvent"/> does, because the message text can
+/// echo values.
+/// </summary>
+internal sealed record IntrospectionEvent(
+    string Tool,
+    string Database,
+    IReadOnlyList<string> Request,
+    long DurationMs,
+    bool Succeeded) : AuditEvent("introspection")
+{
+    public FailureKind? Kind { get; init; }
+
+    public int? ErrorNumber { get; init; }
+}

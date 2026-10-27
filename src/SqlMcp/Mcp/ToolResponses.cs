@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using SqlMcp.Execution;
+using SqlMcp.Introspection;
 using SqlMcp.Permissions;
 
 namespace SqlMcp.Mcp;
@@ -115,3 +117,26 @@ internal sealed record WriteResponse(bool Committed, IReadOnlyList<int> RowsAffe
 internal sealed record ColumnInfo(string Name, string Type);
 
 internal sealed record AbandonResponse(bool Released);
+
+/// <summary>
+/// What <c>list_objects</c> returns. <see cref="Total"/> counts every match; past the row cap, <see cref="Truncated"/>
+/// is set and <see cref="Message"/> says to filter (spec: object list is capped).
+/// </summary>
+internal sealed record ObjectListResponse(IReadOnlyList<ObjectEntry> Objects, int Total, bool Truncated, string? Message = null)
+{
+    public static ObjectListResponse From(ObjectList list) => new(
+        [.. list.Objects.Select(ObjectEntry.From)],
+        list.Total,
+        list.Truncated,
+        list.Truncated
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"Showing {list.Objects.Count} of {list.Total} matching objects: the list is capped at this database's row cap. Filter by schema, type or name pattern to see the rest.")
+            : null);
+}
+
+/// <summary>One listed object. A database-level trigger has no schema, so <see cref="Schema"/> is left out.</summary>
+internal sealed record ObjectEntry(string? Schema, string Name, string Type, long? ApproxRows)
+{
+    public static ObjectEntry From(ObjectSummary summary) => new(summary.Schema, summary.Name, summary.Type.ToWireName(), summary.ApproxRows);
+}
