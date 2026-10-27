@@ -1,6 +1,6 @@
 # ADR-0003: Introspection: our own metadata model, SMO for the creation script
 
-- Status: Accepted (conditional on the change-3 spike)
+- Status: Accepted
 - Date: 2026-10-25
 
 ## Context

@@ -2,9 +2,9 @@
 
 ## 1. SMO spike (gate)
 
-- [ ] 1.1 Add `Microsoft.SqlServer.SqlManagementObjects` (181.x, net10.0) to `Directory.Packages.props` and `SqlMcp.csproj`. Check that it resolves against the pinned `Microsoft.Data.SqlClient` 7.1.1 without a downgrade or a conflict, and that `make build` passes with warnings as errors (design I1). Verify by quoting `BUILD_EXIT:0` and the restored SqlClient version in the devlog note
-- [ ] 1.2 Add a spike integration test that creates a UDT, a table type, a temporal table and a partitioned table in the SQL Server 2025 container, scripts them with SMO `Scripter` on macOS, and asserts that each appears in the output. Verify that `make itest` passes. If it fails, stop with a `stopped-` devlog note asking about DacFx
-- [ ] 1.3 Record the change in the packed tool's size (`dotnet pack`, before and after) in the devlog note. Set ADR-0003's status to "Accepted". Verify that the ADR diff shows only the status line
+- [x] 1.1 Add `Microsoft.SqlServer.SqlManagementObjects` (181.x, net10.0) to `Directory.Packages.props` and `SqlMcp.csproj`. Check that it resolves against the pinned `Microsoft.Data.SqlClient` 7.1.1 without a downgrade or a conflict, and that `make build` passes with warnings as errors (design I1). Verify by quoting `BUILD_EXIT:0` and the restored SqlClient version in the devlog note
+- [x] 1.2 Add a spike integration test that creates a UDT, a table type, a temporal table and a partitioned table in the SQL Server 2025 container, scripts them with SMO `Scripter` on macOS, and asserts that each appears in the output. Verify that `make itest` passes. If it fails, stop with a `stopped-` devlog note asking about DacFx
+- [x] 1.3 Record the change in the packed tool's size (`dotnet pack`, before and after) in the devlog note. Set ADR-0003's status to "Accepted". Verify that the ADR diff shows only the status line
 
 ## 2. Catalog model and list_objects
 
