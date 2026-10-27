@@ -8,7 +8,7 @@ namespace SqlMcp.IntegrationTests.Introspection;
 public sealed class SqlServerCatalogReaderListTests(SeededDatabases seeded) : IClassFixture<SeededDatabases>
 {
     /// <summary>Every user object seed.sql creates, as "schema.name:type" ("-" for no schema).</summary>
-    private static readonly string[] AllSeeded =
+    internal static readonly string[] AllSeeded =
     [
         "-.audit_ddl:trigger",
         "archive.orders:table",

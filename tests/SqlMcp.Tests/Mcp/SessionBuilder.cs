@@ -79,6 +79,12 @@ internal sealed class FakeCatalogReader : ICatalogReader
         return Respond(DescribeOutcome);
     }
 
+    public Task<CatalogOutcome<IReadOnlyList<InventoryItem>>> InventoryAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken)
+    {
+        // No tool takes an inventory until script_database (section 5).
+        throw new NotSupportedException();
+    }
+
     private Task<CatalogOutcome<T>> Respond<T>(CatalogOutcome<T> outcome)
     {
         if (Throws is not null)
@@ -88,6 +94,14 @@ internal sealed class FakeCatalogReader : ICatalogReader
 
         return Cancels ? Task.FromCanceled<CatalogOutcome<T>>(new CancellationToken(canceled: true)) : Task.FromResult(outcome);
     }
+}
+
+/// <summary>A script generator for sessions that never script; script_database's pipeline tests give it behaviour (section 5).</summary>
+internal sealed class FakeScriptGenerator : IScriptGenerator
+{
+    public Task<CatalogOutcome<IReadOnlyList<CatalogItem>>> GenerateAsync(
+        string connectionString, IReadOnlyList<ObjectSummary>? objects, TextWriter writer, EffectiveLimits limits, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }
 
 /// <summary>
@@ -102,6 +116,8 @@ internal sealed class SessionBuilder : IDisposable
     public FakeExecutor Executor { get; } = new();
 
     public FakeCatalogReader Catalog { get; } = new();
+
+    public FakeScriptGenerator Scripts { get; } = new();
 
     public FakeTime Time { get; } = new(new DateTimeOffset(2026, 10, 25, 18, 40, 0, TimeSpan.Zero));
 
@@ -129,7 +145,7 @@ internal sealed class SessionBuilder : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, "project", ".sql-mcp"));
         var audit = AuditLog.Open(Paths.ProjectDirectory, Path.Combine(_temp.Path, "fallback"), Time, 4242);
-        var engines = new Dictionary<Engine, EngineServices> { [Engine.SqlServer] = new(new SqlServerStatementClassifier(), Executor, Catalog) };
+        var engines = new Dictionary<Engine, EngineServices> { [Engine.SqlServer] = new(new SqlServerStatementClassifier(), Executor, Catalog, Scripts) };
         return SqlMcpSession.Load(Paths, name => _environment.GetValueOrDefault(name), audit, Time, engines, "1.2.3-test");
     }
 

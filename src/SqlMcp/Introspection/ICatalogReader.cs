@@ -21,6 +21,12 @@ internal interface ICatalogReader
 
     /// <summary>Resolves <paramref name="name"/> as <see cref="ResolveAsync"/> does, then reads its details.</summary>
     Task<CatalogOutcome<ObjectDetails>> DescribeAsync(string connectionString, ObjectName name, EffectiveLimits limits, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Everything in the catalog a whole-database script should account for (design I5), for <see cref="Completeness"/>:
+    /// what the generator is expected to script, plus the principals and security objects it never scripts. Uncapped.
+    /// </summary>
+    Task<CatalogOutcome<IReadOnlyList<InventoryItem>>> InventoryAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken);
 }
 
 /// <summary>How a catalog read ended. Failures carry the same kinds as an executor's, so they audit the same way.</summary>

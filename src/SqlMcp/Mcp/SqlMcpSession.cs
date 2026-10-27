@@ -8,7 +8,7 @@ using SqlMcp.Permissions;
 namespace SqlMcp.Mcp;
 
 /// <summary>The engine-specific parts behind one <see cref="Engine"/> (design D2, introspection I2).</summary>
-internal sealed record EngineServices(IStatementClassifier Classifier, IQueryExecutor Executor, ICatalogReader CatalogReader);
+internal sealed record EngineServices(IStatementClassifier Classifier, IQueryExecutor Executor, ICatalogReader CatalogReader, IScriptGenerator ScriptGenerator);
 
 /// <summary>
 /// Everything one <c>serve</c> process works from: the effective databases, or the config error that stopped them

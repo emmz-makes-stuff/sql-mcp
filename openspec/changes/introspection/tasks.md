@@ -24,16 +24,16 @@
 
 ## 4. Script generation and completeness
 
-- [ ] 4.1 Add `IScriptGenerator` and `Completeness`: inventory minus scripted gives the omitted list, with the reasons `encrypted`, `security principal`, `security object` and `not scripted by the generator` (design I5). Verify with unit tests covering each reason, and an inventory that is fully scripted
-- [ ] 4.2 Implement `SqlServerCatalogReader.InventoryAsync`: user objects, user types, partition functions and schemes, XML schema collections, user assemblies and full-text catalogs, plus database principals, certificates, keys and database-scoped credentials for the omitted list only. Verify with an integration test against the seed that the user `app_reader` and the encrypted procedure are in the inventory
-- [ ] 4.3 Implement `SmoScriptGenerator`:
+- [x] 4.1 Add `IScriptGenerator` and `Completeness`: inventory minus scripted gives the omitted list, with the reasons `encrypted`, `security principal`, `security object` and `not scripted by the generator` (design I5). Verify with unit tests covering each reason, and an inventory that is fully scripted
+- [x] 4.2 Implement `SqlServerCatalogReader.InventoryAsync`: user objects, user types, partition functions and schemes, XML schema collections, user assemblies and full-text catalogs, plus database principals, certificates, keys and database-scoped credentials for the omitted list only. Verify with an integration test against the seed that the user `app_reader` and the encrypted procedure are in the inventory
+- [x] 4.3 Implement `SmoScriptGenerator`:
   - the `ServerConnection` gets the database's statement timeout, and the init fields are prefetched;
   - the scripting options are those in design I5;
   - encrypted modules are filtered out first, the rest are ordered with `DependencyWalker`, and `EnumScriptWithList` streams them into a `TextWriter`;
   - it runs on `Task.Run`, and checks cancellation between objects.
 
   Verify with an integration test that a whole-seed script names every non-omitted object, with each FK target created before the table that references it
-- [ ] 4.4 Support chosen objects: the walk is filtered down to the resolved set, with no dependencies added. Verify with an integration test for "Two tables" (`dbo.order_lines` chosen together with `dbo.orders` gives only those two, with `orders` first)
+- [x] 4.4 Support chosen objects: the walk is filtered down to the resolved set, with no dependencies added. Verify with an integration test for "Two tables" (`dbo.order_lines` chosen together with `dbo.orders` gives only those two, with `orders` first)
 
 ## 5. script_database tool, files and init
 

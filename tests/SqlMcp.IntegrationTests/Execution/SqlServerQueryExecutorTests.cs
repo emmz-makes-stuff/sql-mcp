@@ -10,6 +10,9 @@ namespace SqlMcp.IntegrationTests.Execution;
 
 // These call the executor directly, below the classifier (design D11): a write or a WAITFOR can't reach it
 // through the query tool, but the executor must still undo and bound whatever it is given.
+// They run alone: two measure the whole process or server (allocated bytes, sql-mcp sessions on a reused spid), so
+// another class's work in parallel, such as SMO scripting, would show up in them.
+[Collection(nameof(SqlServerQueryExecutorTests))]
 public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
 {
     // The JSON text as written, without the default encoder's escaping of characters such as '+'.
@@ -199,9 +202,17 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
         Assert.Equal(250, result.ResultSets[1].Rows.Count);
         var spid = result.ResultSets[0].Rows.Single()[0]!.GetValue<short>();
 
-        // The session that ran the query is gone, and with it any transaction or lock.
-        Assert.Equal(0, await db.ScalarAsync(
-            $"SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE session_id = {spid} AND program_name = '{SqlServerQueryExecutor.ApplicationName}'"));
+        // The session that ran the query is gone, and with it any transaction or lock. The client has closed it by
+        // now; the server ends the session asynchronously, which takes a moment when the container is busy.
+        var sql = $"SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE session_id = {spid} AND program_name = '{SqlServerQueryExecutor.ApplicationName}'";
+        var remaining = await db.ScalarAsync(sql);
+        for (var attempt = 0; attempt < 20 && !Equals(remaining, 0); attempt++)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            remaining = await db.ScalarAsync(sql);
+        }
+
+        Assert.Equal(0, remaining);
     }
 
     [Fact]
@@ -317,3 +328,6 @@ public sealed class SqlServerQueryExecutorTests(SqlServerFixture db)
     private Task<QueryOutcome> Run(string sql, EffectiveLimits? limits = null) =>
         _executor.ExecuteAsync(db.ConnectionString, sql, BatchMode.ReadOnly, limits ?? EffectiveLimits.Default, Cancel);
 }
+
+[CollectionDefinition(nameof(SqlServerQueryExecutorTests), DisableParallelization = true)]
+public sealed class RunsAlone;

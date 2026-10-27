@@ -83,6 +83,64 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         ORDER BY schema_name, type;
         """;
 
+    /// <summary>
+    /// Everything a whole-database script accounts for (design I5). <c>class</c> is the <see cref="InventoryClass"/>:
+    /// 0 scriptable, 1 security principal, 2 security object. Besides the listed objects: any other top-level user
+    /// object (a rule, a standalone default, a queue…) by its <c>type_desc</c>, leaving out table types' own rows in
+    /// <c>sys.objects</c>; user schemas (ids 5–16383 leave out dbo, guest, INFORMATION_SCHEMA, sys and the fixed-role
+    /// schemas); and principals other than public, dbo, guest, INFORMATION_SCHEMA, sys and the fixed roles.
+    /// Each principal holding explicit permissions gets a <c>permissions</c> entry, so the omitted list names them: the
+    /// defaults every database has (a user's CONNECT, public's grants on system objects and on column key definitions)
+    /// don't count.
+    /// Encryption is read for <c>sys.objects</c> modules only, so an encrypted database trigger reads as unencrypted.
+    /// </summary>
+    private const string InventorySql = ObjectsCte + """
+        , inventory AS (
+            SELECT schema_name, name, type, 0 AS class,
+                CAST(CASE WHEN code NOT IN ('TT', 'UT') AND OBJECTPROPERTY(id, 'IsEncrypted') = 1 THEN 1 ELSE 0 END AS bit) AS encrypted
+            FROM objects
+            UNION ALL
+            SELECT s.name, o.name, LOWER(o.type_desc) COLLATE DATABASE_DEFAULT, 0, CAST(0 AS bit)
+            FROM sys.objects AS o
+            JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+            WHERE o.is_ms_shipped = 0 AND o.parent_object_id = 0
+              AND o.type NOT IN ('U', 'V', 'P', 'PC', 'FN', 'IF', 'TF', 'FS', 'FT', 'AF', 'TR', 'TA', 'SO', 'SN', 'TT', 'S', 'IT')
+              AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA')
+            UNION ALL
+            SELECT NULL, name, 'schema', 0, CAST(0 AS bit) FROM sys.schemas WHERE schema_id BETWEEN 5 AND 16383
+            UNION ALL
+            SELECT NULL, name, 'partition_function', 0, CAST(0 AS bit) FROM sys.partition_functions
+            UNION ALL
+            SELECT NULL, name, 'partition_scheme', 0, CAST(0 AS bit) FROM sys.partition_schemes
+            UNION ALL
+            SELECT SCHEMA_NAME(schema_id), name, 'xml_schema_collection', 0, CAST(0 AS bit)
+            FROM sys.xml_schema_collections WHERE SCHEMA_NAME(schema_id) <> 'sys'
+            UNION ALL
+            SELECT NULL, name, 'assembly', 0, CAST(0 AS bit) FROM sys.assemblies WHERE is_user_defined = 1
+            UNION ALL
+            SELECT NULL, name, 'fulltext_catalog', 0, CAST(0 AS bit) FROM sys.fulltext_catalogs
+            UNION ALL
+            SELECT NULL, name, CASE type WHEN 'R' THEN 'role' WHEN 'A' THEN 'application_role' ELSE 'user' END, 1, CAST(0 AS bit)
+            FROM sys.database_principals WHERE principal_id >= 5 AND is_fixed_role = 0
+            UNION ALL
+            SELECT DISTINCT NULL, pr.name, 'permissions', 1, CAST(0 AS bit)
+            FROM sys.database_permissions AS p
+            JOIN sys.database_principals AS pr ON pr.principal_id = p.grantee_principal_id
+            WHERE NOT (p.class = 0 AND p.permission_name = 'CONNECT' AND p.state = 'G')
+              AND NOT (pr.principal_id = 0 AND p.state = 'G' AND (p.class = 1 AND p.major_id < 0
+                  OR p.class = 0 AND p.permission_name IN ('VIEW ANY COLUMN ENCRYPTION KEY DEFINITION', 'VIEW ANY COLUMN MASTER KEY DEFINITION')))
+            UNION ALL
+            SELECT NULL, name, 'certificate', 2, CAST(0 AS bit) FROM sys.certificates
+            UNION ALL
+            SELECT NULL, name, 'asymmetric_key', 2, CAST(0 AS bit) FROM sys.asymmetric_keys
+            UNION ALL
+            SELECT NULL, name, 'symmetric_key', 2, CAST(0 AS bit) FROM sys.symmetric_keys
+            UNION ALL
+            SELECT NULL, name, 'database_scoped_credential', 2, CAST(0 AS bit) FROM sys.database_scoped_credentials
+        )
+        SELECT schema_name, name, type, class, encrypted FROM inventory ORDER BY class, type, schema_name, name;
+        """;
+
     /// <summary>A column's or parameter's type, as <see cref="SqlServerTypeNames.Format"/> takes it.</summary>
     private const string TypeColumns = "t.name, SCHEMA_NAME(t.schema_id), t.is_user_defined";
 
@@ -248,6 +306,23 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                 ObjectType.Type => await describer.AliasTypeAsync(details).ConfigureAwait(false),
                 _ => throw new InvalidOperationException($"No description for object type {summary.Type}."),
             };
+        }, cancellationToken);
+
+    public Task<CatalogOutcome<IReadOnlyList<InventoryItem>>> InventoryAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken) =>
+        ReadAsync<IReadOnlyList<InventoryItem>>(connectionString, limits, async connection =>
+        {
+            await using var command = Command(connection, InventorySql, limits);
+            var items = new List<InventoryItem>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                items.Add(new InventoryItem(
+                    new CatalogItem(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetString(1), reader.GetString(2)),
+                    (InventoryClass)reader.GetInt32(3),
+                    reader.GetBoolean(4)));
+            }
+
+            return items;
         }, cancellationToken);
 
     /// <summary>An object a name resolved to, with what the describe queries need to find it.</summary>

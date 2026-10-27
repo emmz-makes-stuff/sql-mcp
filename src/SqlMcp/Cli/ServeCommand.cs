@@ -40,7 +40,7 @@ internal static class ServeCommand
         var audit = AuditLog.Open(paths.ProjectDirectory, AuditLog.FallbackDirectoryForCurrentUser(), time, Environment.ProcessId);
         var engines = new Dictionary<Engine, EngineServices>
         {
-            [Engine.SqlServer] = new(new SqlServerStatementClassifier(), new SqlServerQueryExecutor(time), new SqlServerCatalogReader(time)),
+            [Engine.SqlServer] = new(new SqlServerStatementClassifier(), new SqlServerQueryExecutor(time), new SqlServerCatalogReader(time), new SmoScriptGenerator(time)),
         };
         using var session = SqlMcpSession.Load(paths, Environment.GetEnvironmentVariable, audit, time, engines, Version);
 
