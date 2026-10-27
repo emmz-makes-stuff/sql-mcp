@@ -34,11 +34,18 @@ internal static class ToolDescriptions
 
     public const string ListObjects =
         "Lists the user objects in one database: tables, views, procedures, functions, triggers, sequences, synonyms, types and table types, with each one's schema, name and type, and an approximate row count for tables. " +
-        "Use it to find objects without writing catalog queries. Narrow the list with a schema, one or more types, and a name pattern where * matches any characters and ? one character; matching ignores case. " +
+        "Use it to find objects without writing catalog queries, then describe_object for an object's details. Narrow the list with a schema, one or more types, and a name pattern where * matches any characters and ? one character; matching ignores case. " +
         "The list is capped at the database's row cap; past it, the result is truncated and gives the total, and you should filter further. " +
         VisibilityGuidance;
 
-    /// <summary>What every write tool's description says about the transaction and the cap (spec: write tool descriptions).</summary>
+    public const string DescribeObject =
+        "Describes one object in one database, given its name as schema.name (brackets allowed, such as [dbo].[order lines]); a name without a schema is accepted only when exactly one object has it. Use list_objects to find names. " +
+        "For a table or view: its columns in order with types, nullability, defaults, identity and computed expressions; for a table, also its primary key, unique and check constraints, indexes, triggers, the foreign keys it declares and the ones that reference it, and a temporal table's history table and period columns. " +
+        "For a view, procedure, function or trigger: its definition, or why it is unavailable (such as encrypted); for a procedure or function, its parameters in order, and a function's kind and return type. " +
+        "For a sequence, synonym, type or table type: its settings, target, base type, or columns and constraints. Parts that don't apply or are empty are left out. " +
+        VisibilityGuidance;
+
+    /// <summary>What every write tool)'s description says about the transaction and the cap (spec: write tool descriptions).</summary>
     private const string WriteGuidance =
         "The batch runs in one transaction and commits all or nothing: if any statement fails, the batch times out, or its statements together affect more rows than the affected-rows cap, everything is rolled back. " +
         "Make each change as narrow as you can. A change over the cap runs in full before it is undone, holding locks while it runs and while it rolls back, so before a change that could touch many rows, count the matching rows with query first. " +
@@ -130,6 +137,7 @@ internal static class ToolCatalog
         if (session.Databases.Any(d => d.IsAllowed(ToolGroup.Introspection)))
         {
             list.Add(Create(tools, nameof(SqlMcpTools.ListObjects), ToolNames.ListObjects, ToolDescriptions.ListObjects));
+            list.Add(Create(tools, nameof(SqlMcpTools.DescribeObject), ToolNames.DescribeObject, ToolDescriptions.DescribeObject));
         }
 
         return list;
@@ -202,6 +210,12 @@ internal sealed class SqlMcpTools(ToolPipeline pipeline)
         [Description("Only objects whose names match this pattern: * matches any characters, ? one character, ignoring case, such as order*. Optional.")] string? pattern = null,
         CancellationToken cancellationToken = default) =>
         ToCallResult(await pipeline.ListObjectsAsync(database, schema, types, pattern, cancellationToken).ConfigureAwait(false));
+
+    public async Task<CallToolResult> DescribeObject(
+        [Description(DatabaseParameter)] string database,
+        [Description("The object's name as schema.name, such as dbo.orders or [sales].[open orders]. A name without a schema works only when exactly one object has it.")] string name,
+        CancellationToken cancellationToken) =>
+        ToCallResult(await pipeline.DescribeObjectAsync(database, name, cancellationToken).ConfigureAwait(false));
 
     public CallToolResult NextPage([Description(HandleParameter)] string handle) => ToCallResult(pipeline.NextPage(handle));
 

@@ -19,6 +19,7 @@ internal static class ToolNames
     public const string NextPage = "next_page";
     public const string Abandon = "abandon";
     public const string ListObjects = "list_objects";
+    public const string DescribeObject = "describe_object";
 }
 
 /// <summary>
@@ -83,6 +84,22 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             filter.Describe(),
             (reader, connectionString, limits, token) => reader.ListAsync(connectionString, filter, limits, token),
             list => ToolResult.Ok(ObjectListResponse.From(list)),
+            cancellationToken);
+    }
+
+    public Task<ToolResult> DescribeObjectAsync(string database, string name, CancellationToken cancellationToken)
+    {
+        if (!ObjectName.TryParse(name, out var parsed, out var error))
+        {
+            return Task.FromResult(ToolResult.Error(error));
+        }
+
+        return RunIntrospectionAsync(
+            ToolNames.DescribeObject,
+            database,
+            [parsed.ToString()],
+            (reader, connectionString, limits, token) => reader.DescribeAsync(connectionString, parsed, limits, token),
+            details => ToolResult.Ok(ObjectDetailsResponse.From(details)),
             cancellationToken);
     }
 

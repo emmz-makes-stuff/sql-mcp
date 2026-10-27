@@ -42,13 +42,18 @@ internal sealed class FakeExecutor : IQueryExecutor
     }
 }
 
-/// <summary>A catalog reader that records the filters it was given and returns a canned outcome.</summary>
+/// <summary>A catalog reader that records what it was asked for and returns a canned outcome.</summary>
 internal sealed class FakeCatalogReader : ICatalogReader
 {
     public List<ObjectFilter> Lists { get; } = [];
 
     public CatalogOutcome<ObjectList> ListOutcome { get; set; } =
         new CatalogSucceeded<ObjectList>(new ObjectList([], 0, false), TimeSpan.FromMilliseconds(4));
+
+    public List<ObjectName> Describes { get; } = [];
+
+    public CatalogOutcome<ObjectDetails> DescribeOutcome { get; set; } =
+        new CatalogSucceeded<ObjectDetails>(new ObjectDetails("dbo", "orders", ObjectType.Table), TimeSpan.FromMilliseconds(4));
 
     /// <summary>When set, the call is cancelled as if the client gave up while the catalog was read.</summary>
     public bool Cancels { get; set; }
@@ -60,6 +65,18 @@ internal sealed class FakeCatalogReader : ICatalogReader
     {
         Lists.Add(filter);
         return Respond(ListOutcome);
+    }
+
+    public Task<CatalogOutcome<IReadOnlyList<ObjectSummary>>> ResolveAsync(string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken)
+    {
+        // No tool resolves names on their own until script_database (section 4).
+        throw new NotSupportedException();
+    }
+
+    public Task<CatalogOutcome<ObjectDetails>> DescribeAsync(string connectionString, ObjectName name, EffectiveLimits limits, CancellationToken cancellationToken)
+    {
+        Describes.Add(name);
+        return Respond(DescribeOutcome);
     }
 
     private Task<CatalogOutcome<T>> Respond<T>(CatalogOutcome<T> outcome)

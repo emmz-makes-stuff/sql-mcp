@@ -46,6 +46,9 @@ internal enum FailureKind
     /// of the batch may have been committed.
     /// </summary>
     OutcomeUnknown,
+
+    /// <summary>An introspection name matched no object, or more than one (design I4).</summary>
+    UnresolvedName,
     Other,
 }
 

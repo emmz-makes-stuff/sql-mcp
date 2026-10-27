@@ -140,3 +140,60 @@ internal sealed record ObjectEntry(string? Schema, string Name, string Type, lon
 {
     public static ObjectEntry From(ObjectSummary summary) => new(summary.Schema, summary.Name, summary.Type.ToWireName(), summary.ApproxRows);
 }
+
+/// <summary>
+/// What <c>describe_object</c> returns: the object's identity and the parts for its type (design I3). Parts that
+/// don't apply or are empty are null, so they're left out. A definition is its text, or
+/// <c>{ "unavailable": "&lt;reason&gt;" }</c>.
+/// </summary>
+internal sealed record ObjectDetailsResponse(
+    string? Schema,
+    string Name,
+    string Type,
+    string? Kind,
+    IReadOnlyList<ColumnDetails>? Columns,
+    KeyDetails? PrimaryKey,
+    IReadOnlyList<KeyDetails>? UniqueConstraints,
+    IReadOnlyList<CheckDetails>? CheckConstraints,
+    IReadOnlyList<IndexDetails>? Indexes,
+    IReadOnlyList<string>? Triggers,
+    IReadOnlyList<ForeignKeyDetails>? ForeignKeys,
+    IReadOnlyList<ForeignKeyDetails>? ReferencedBy,
+    TemporalDetails? Temporal,
+    IReadOnlyList<ParameterDetails>? Parameters,
+    string? ReturnType,
+    JsonNode? Definition,
+    SequenceDetails? Sequence,
+    string? Target,
+    string? BaseType,
+    bool? Nullable)
+{
+    public static ObjectDetailsResponse From(ObjectDetails details) => new(
+        details.Schema,
+        details.Name,
+        details.Type.ToWireName(),
+        details.Kind,
+        NullIfEmpty(details.Columns),
+        details.PrimaryKey,
+        NullIfEmpty(details.UniqueConstraints),
+        NullIfEmpty(details.CheckConstraints),
+        NullIfEmpty(details.Indexes),
+        NullIfEmpty(details.Triggers),
+        NullIfEmpty(details.ForeignKeys),
+        NullIfEmpty(details.ReferencedBy),
+        details.Temporal,
+        NullIfEmpty(details.Parameters),
+        details.ReturnType,
+        details.Definition switch
+        {
+            Introspection.Definition.Text text => JsonValue.Create(text.Value),
+            Introspection.Definition.Unavailable unavailable => new JsonObject { ["unavailable"] = unavailable.Reason },
+            _ => null,
+        },
+        details.Sequence,
+        details.Target,
+        details.BaseType,
+        details.Nullable);
+
+    private static IReadOnlyList<T>? NullIfEmpty<T>(IReadOnlyList<T>? items) => items is { Count: > 0 } ? items : null;
+}

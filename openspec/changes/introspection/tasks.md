@@ -16,11 +16,11 @@
 
 ## 3. describe_object
 
-- [ ] 3.1 Parse names with `TSqlParser.ParseSchemaObjectName`, refusing three and four parts, and implement `ResolveAsync`: an exact schema-qualified match, or a unique unqualified match. Otherwise give the ambiguous error (naming each candidate) or the not-found error (suggesting `list_objects`). Verify with unit tests for bracketed and quoted names and three-part refusal, and integration tests for "Ambiguous unqualified name" and "Unknown object"
-- [ ] 3.2 Implement `DescribeAsync` for tables and views: columns in order (type, nullability, default, identity, computed expression), the primary key, unique and check constraints, indexes, triggers, foreign keys both ways, and the temporal history table and period columns. Verify with integration tests for "Table with keys" and "Temporal table"
-- [ ] 3.3 Implement `DescribeAsync` for code objects: the definition from `sys.sql_modules`, or `{unavailable: encrypted | no permission}`, plus parameters in order and a function's return type and kind. Verify with integration tests for "Procedure", "Encrypted procedure", a scalar function and an inline table-valued function
-- [ ] 3.4 Implement `DescribeAsync` for sequences, synonyms, user-defined types and table types. Verify with integration tests for "Synonym", a sequence, a UDT and a table type
-- [ ] 3.5 Add the `describe_object` tool through `RunIntrospectionAsync`, with empty parts left out of the JSON, its description and its read-only annotation. Verify with a response-shape test (a view gives columns and a definition, and no keys) and a pipeline test that the audit event records the name and no details
+- [x] 3.1 Parse names with `TSqlParser.ParseSchemaObjectName`, refusing three and four parts, and implement `ResolveAsync`: an exact schema-qualified match, or a unique unqualified match. Otherwise give the ambiguous error (naming each candidate) or the not-found error (suggesting `list_objects`). Verify with unit tests for bracketed and quoted names and three-part refusal, and integration tests for "Ambiguous unqualified name" and "Unknown object"
+- [x] 3.2 Implement `DescribeAsync` for tables and views: columns in order (type, nullability, default, identity, computed expression), the primary key, unique and check constraints, indexes, triggers, foreign keys both ways, and the temporal history table and period columns. Verify with integration tests for "Table with keys" and "Temporal table"
+- [x] 3.3 Implement `DescribeAsync` for code objects: the definition from `sys.sql_modules`, or `{unavailable: encrypted | no permission}`, plus parameters in order and a function's return type and kind. Verify with integration tests for "Procedure", "Encrypted procedure", a scalar function and an inline table-valued function
+- [x] 3.4 Implement `DescribeAsync` for sequences, synonyms, user-defined types and table types. Verify with integration tests for "Synonym", a sequence, a UDT and a table type
+- [x] 3.5 Add the `describe_object` tool through `RunIntrospectionAsync`, with empty parts left out of the JSON, its description and its read-only annotation. Verify with a response-shape test (a view gives columns and a definition, and no keys) and a pipeline test that the audit event records the name and no details
 
 ## 4. Script generation and completeness
 

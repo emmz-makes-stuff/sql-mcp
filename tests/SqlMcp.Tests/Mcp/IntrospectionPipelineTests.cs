@@ -189,6 +189,120 @@ public sealed class IntrospectionPipelineTests : IDisposable
         Assert.Empty(_builder.Catalog.Lists);
     }
 
+    [Fact]
+    public async Task Describe_call_is_audited_without_the_details()
+    {
+        _builder.User(OneDatabase);
+        _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(
+            new ObjectDetails("dbo", "orders", ObjectType.Table)
+            {
+                Columns = [new ColumnDetails("secret_column", "int", false, null, true, null)],
+                Definition = new Definition.Text("CREATE TABLE secret_definition"),
+            },
+            TimeSpan.FromMilliseconds(6));
+        using var session = _builder.Build();
+
+        Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "[dbo].[orders]", Cancel));
+
+        Assert.Equal(new ObjectName("dbo", "orders"), Assert.Single(_builder.Catalog.Describes));
+        var introspection = Single(session, "introspection");
+        Assert.Equal("describe_object", introspection["tool"]!.GetValue<string>());
+        Assert.Equal(Sales, introspection["database"]!.GetValue<string>());
+        Assert.Equal(["dbo.orders"], introspection["request"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Equal(6, introspection["duration_ms"]!.GetValue<long>());
+        Assert.True(introspection["succeeded"]!.GetValue<bool>());
+        var log = File.ReadAllText(session.Audit.FilePath!);
+        Assert.DoesNotContain("secret_column", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret_definition", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_view_gives_columns_and_a_definition_and_no_keys()
+    {
+        _builder.User(OneDatabase);
+        _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(
+            new ObjectDetails("sales", "open_orders", ObjectType.View)
+            {
+                Columns = [new ColumnDetails("id", "int", false, null, null, null), new ColumnDetails("total", "decimal(10,2)", true, null, null, "([a]+[b])")],
+                UniqueConstraints = [],
+                Definition = new Definition.Text("CREATE VIEW sales.open_orders AS SELECT 1"),
+            },
+            TimeSpan.FromMilliseconds(3));
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "sales.open_orders", Cancel);
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Equal(
+            """{"schema":"sales","name":"open_orders","type":"view","columns":[{"name":"id","type":"int","nullable":false},{"name":"total","type":"decimal(10,2)","nullable":true,"computed":"([a]+[b])"}],"definition":"CREATE VIEW sales.open_orders AS SELECT 1"}""",
+            result.Text);
+    }
+
+    [Fact]
+    public async Task An_unavailable_definition_says_why()
+    {
+        _builder.User(OneDatabase);
+        _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(
+            new ObjectDetails("dbo", "secret_report", ObjectType.Procedure)
+            {
+                Parameters = [new ParameterDetails("@before", "date", "input", null)],
+                Definition = new Definition.Unavailable(Definition.Encrypted),
+            },
+            TimeSpan.FromMilliseconds(3));
+        using var session = _builder.Build();
+
+        var json = Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.secret_report", Cancel));
+
+        Assert.Equal("""{"unavailable":"encrypted"}""", json["definition"]!.ToJsonString());
+        Assert.Equal("""[{"name":"@before","type":"date","direction":"input"}]""", json["parameters"]!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task A_bad_name_is_refused_before_the_catalog_is_read()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "app.dbo.orders", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal("'app.dbo.orders' names another database or server. Give schema.name in this database, such as dbo.orders.", result.Text);
+        Assert.Empty(_builder.Catalog.Describes);
+        Assert.DoesNotContain(Events(session), e => e["event"]!.GetValue<string>() == "introspection");
+    }
+
+    [Fact]
+    public async Task An_unresolved_name_is_audited_as_failed()
+    {
+        const string message = "No object named 'dbo.nothing_here' was found. Use list_objects to find it; only objects this database login can see are found.";
+        _builder.User(OneDatabase);
+        _builder.Catalog.DescribeOutcome = new CatalogFailed<ObjectDetails>(FailureKind.UnresolvedName, message, null, TimeSpan.FromMilliseconds(2));
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.nothing_here", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal(message, result.Text);
+        var introspection = Single(session, "introspection");
+        Assert.False(introspection["succeeded"]!.GetValue<bool>());
+        Assert.Equal("unresolved_name", introspection["kind"]!.GetValue<string>());
+        Assert.Equal(["dbo.nothing_here"], introspection["request"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task Describe_denied()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "deny": ["introspection"] } ] }""");
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.orders", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.Equal($"introspection is denied on {Sales} (source: user config).", result.Text);
+        Assert.Empty(_builder.Catalog.Describes);
+        Assert.Equal("describe_object", Single(session, "denied")["tool"]!.GetValue<string>());
+    }
+
     private static JsonObject Json(ToolResult result)
     {
         Assert.False(result.IsError, result.Text);

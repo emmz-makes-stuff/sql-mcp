@@ -54,7 +54,7 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "next_page", "abandon", "list_objects"], Names(session));
+        Assert.Equal(["list_databases", "query", "next_page", "abandon", "list_objects", "describe_object"], Names(session));
     }
 
     [Fact]
@@ -156,34 +156,36 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User(AllWrites);
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon", "list_objects"], Names(session));
+        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon", "list_objects", "describe_object"], Names(session));
     }
 
     [Fact]
-    public void Introspection_alone_offers_list_objects_without_paging()
+    public void Introspection_alone_offers_its_tools_without_paging()
     {
         _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "list_objects"], Names(session));
+        Assert.Equal(["list_databases", "list_objects", "describe_object"], Names(session));
     }
 
     [Fact]
-    public void List_objects_is_not_offered_when_introspection_is_denied_everywhere()
+    public void Introspection_tools_are_not_offered_when_introspection_is_denied_everywhere()
     {
         _builder.User("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" }, { "connectionString": "Server=other;Database=Hr" } ] }""");
         using var session = _builder.Build();
 
         Assert.DoesNotContain(ToolNames.ListObjects, Names(session));
+        Assert.DoesNotContain(ToolNames.DescribeObject, Names(session));
     }
 
     [Fact]
-    public void List_objects_is_offered_when_one_database_allows_introspection()
+    public void Introspection_tools_are_offered_when_one_database_allows_introspection()
     {
         _builder.User("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["introspection"] }, { "connectionString": "Server=other;Database=Hr" } ] }""");
         using var session = _builder.Build();
 
         Assert.Contains(ToolNames.ListObjects, Names(session));
+        Assert.Contains(ToolNames.DescribeObject, Names(session));
     }
 
     [Fact]
@@ -200,6 +202,22 @@ public sealed class ToolCatalogTests : IDisposable
         Assert.Contains("a name pattern where * matches any characters and ? one character", listObjects.Description, StringComparison.Ordinal);
         Assert.Contains("Only objects the database login can see are shown", listObjects.Description, StringComparison.Ordinal);
         Assert.Contains("filter further", listObjects.Description, StringComparison.Ordinal);
+        Assert.Contains("then describe_object for an object's details", listObjects.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Agent_reads_the_describe_object_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var describeObject = Tool(session, ToolNames.DescribeObject);
+
+        Assert.True(describeObject.Annotations?.ReadOnlyHint);
+        Assert.False(describeObject.Annotations?.DestructiveHint);
+        Assert.False(describeObject.Annotations?.OpenWorldHint);
+        Assert.Contains("Use list_objects to find names", describeObject.Description, StringComparison.Ordinal);
+        Assert.Contains("Only objects the database login can see are shown", describeObject.Description, StringComparison.Ordinal);
     }
 
     [Fact]
