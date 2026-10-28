@@ -215,7 +215,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     private const string TypeColumns = "t.name, SCHEMA_NAME(t.schema_id), t.is_user_defined";
 
     private const string ColumnsSql = $"""
-        SELECT c.name, {TypeColumns}, c.max_length, c.precision, c.scale, c.is_nullable, dc.definition, c.is_identity, cc.definition
+        SELECT c.name, {TypeColumns}, c.max_length, c.precision, c.scale, c.is_nullable, dc.definition, dc.name, c.is_identity, cc.definition
         FROM sys.columns AS c
         JOIN sys.types AS t ON t.user_type_id = c.user_type_id
         LEFT JOIN sys.default_constraints AS dc ON dc.object_id = c.default_object_id
@@ -609,12 +609,13 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 
         private Task<List<ColumnDetails>> ColumnsAsync() =>
             RowsAsync(ColumnsSql, r => new ColumnDetails(
-                r.GetString(0),
-                TypeName(r, 1),
-                r.GetBoolean(7),
-                r.IsDBNull(8) ? null : r.GetString(8),
-                r.GetBoolean(9) ? true : null,
-                r.IsDBNull(10) ? null : r.GetString(10)));
+                Name: r.GetString(0),
+                Type: TypeName(r, 1),
+                Nullable: r.GetBoolean(7),
+                Default: r.IsDBNull(8) ? null : r.GetString(8),
+                DefaultName: r.IsDBNull(9) ? null : r.GetString(9),
+                Identity: r.GetBoolean(10) ? true : null,
+                Computed: r.IsDBNull(11) ? null : r.GetString(11)));
 
         private async Task<List<IndexDetails>> IndexesAsync()
         {

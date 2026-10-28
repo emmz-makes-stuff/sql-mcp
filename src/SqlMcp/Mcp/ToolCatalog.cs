@@ -43,7 +43,7 @@ internal static class ToolDescriptions
     public const string DescribeObject =
         "Describes one object in one database, given its name as schema.name (brackets allowed, such as [dbo].[order lines]); a name without a schema is accepted only when exactly one object has it. Use list_objects to find names. " +
         "Types are named separately from other objects, so a table and a table type can share a name; then give type too, such as table_type. " +
-        "For a table or view: its columns in order with types, nullability, defaults, identity and computed expressions; for a table, also its primary key, unique and check constraints, indexes, triggers, the foreign keys it declares and the ones that reference it, and a temporal table's history table and period columns. " +
+        "For a table or view: its columns in order with types, nullability, defaults (the expression and the constraint name), identity and computed expressions; for a table, also its primary key, unique and check constraints, indexes, triggers, the foreign keys it declares and the ones that reference it, and a temporal table's history table and period columns. " +
         "For a view, procedure, function or trigger: its definition, or why it is unavailable (such as encrypted); for a procedure or function, its parameters in order, and a function's kind and return type. " +
         "For a sequence, synonym, type or table type: its settings, target, base type, or columns and constraints. Parts that don't apply or are empty are left out. " +
         VisibilityGuidance;

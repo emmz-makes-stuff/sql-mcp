@@ -1,6 +1,7 @@
 -- A database holding every object type the introspection tools cover, plus the awkward cases: an encrypted
--- procedure, a database user, a database DDL trigger, a temporal table, a partitioned table, and the name clashes at
--- the end. Names are written in one consistent case, so the seed also runs on a case-sensitive collation.
+-- procedure, a database user, a database DDL trigger, a temporal table, a partitioned table, defaults SQL Server names
+-- itself (dbo.orders.status and the crm.address table type), and the name clashes at the end. Names are written in
+-- one consistent case, so the seed also runs on a case-sensitive collation.
 
 CREATE SCHEMA sales;
 GO
@@ -28,7 +29,7 @@ CREATE TABLE dbo.orders (
     user_id int NOT NULL CONSTRAINT fk_orders_users REFERENCES dbo.users (id),
     number bigint NOT NULL CONSTRAINT df_orders_number DEFAULT (NEXT VALUE FOR dbo.order_numbers),
     placed_at date NOT NULL,
-    status varchar(10) NOT NULL
+    status varchar(10) NOT NULL DEFAULT ('new')
 );
 GO
 CREATE INDEX ix_orders_user ON dbo.orders (user_id) INCLUDE (placed_at);
@@ -99,7 +100,7 @@ GO
 -- name in different schemas, both referencing archive.orders.
 CREATE SCHEMA crm;
 GO
-CREATE TYPE crm.address AS TABLE (line nvarchar(100) NOT NULL);
+CREATE TYPE crm.address AS TABLE (line nvarchar(100) NOT NULL DEFAULT (N''));
 GO
 CREATE TABLE crm.address (id int NOT NULL CONSTRAINT pk_crm_address PRIMARY KEY, line nvarchar(100) NOT NULL);
 GO
