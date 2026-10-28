@@ -13,15 +13,15 @@ databases, instead of the `mssql`/`pgsql` CLIs, which run anything the login all
 
 It ships as the `dotnet` tool `Emmz.SqlMcp` (command `sql-mcp`). SQL Server is supported first. PostgreSQL is planned.
 
-> Status: under construction. The package isn't on nuget.org yet.
+> Status: alpha. The first prerelease, `0.1.0-alpha.1`, is on nuget.org.
 
 ## Install
 
 ```
-dotnet tool install --global Emmz.SqlMcp
+dotnet tool install --global Emmz.SqlMcp --prerelease
 ```
 
-Or run it without installing, through `dnx` (.NET 10): `dnx Emmz.SqlMcp serve`. `sql-mcp register` uses `dnx` in
+Or run it without installing, through `dnx` (.NET 10): `dnx Emmz.SqlMcp@0.1.0-alpha.1 serve`. `sql-mcp register` uses `dnx` in
 the launch command when `sql-mcp` isn't on your PATH.
 
 ## Quick start
