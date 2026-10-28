@@ -135,6 +135,71 @@ public sealed class SmoScriptGeneratorTests(SqlServerFixture server, SeededDatab
     }
 
     [Fact]
+    public async Task Encrypted_trigger_on_a_chosen_table_is_named_as_omitted()
+    {
+        var connectionString = await server.CreateDatabaseAsync($"chosen_trigger_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(connectionString, """
+            CREATE TABLE dbo.accounts (id int NOT NULL PRIMARY KEY);
+            GO
+            CREATE TRIGGER dbo.accounts_audit ON dbo.accounts WITH ENCRYPTION AFTER INSERT AS BEGIN SET NOCOUNT ON; END;
+            GO
+            CREATE TRIGGER dbo.accounts_plain ON dbo.accounts AFTER UPDATE AS BEGIN SET NOCOUNT ON; END;
+            GO
+            """);
+        var accounts = new ObjectSummary("dbo", "accounts", ObjectType.Table, null);
+
+        var outcome = await _generator.GenerateAsync(connectionString, [accounts], new StringWriter(), EffectiveLimits.Default, Cancel);
+        var inventory = Assert.IsType<CatalogSucceeded<IReadOnlyList<InventoryItem>>>(
+            await _reader.InventoryAsync(connectionString, EffectiveLimits.Default, Cancel)).Value;
+
+        var scripted = Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value;
+        Assert.Equal([new CatalogItem("dbo", "accounts", "table"), new CatalogItem("dbo", "accounts_plain", "trigger")], scripted);
+        Assert.Equal(
+            [new OmittedItem(new CatalogItem("dbo", "accounts_audit", "trigger"), Completeness.Encrypted)],
+            Completeness.Omitted(Completeness.Narrowed(inventory, new HashSet<CatalogItem> { new("dbo", "accounts", "table") }), scripted));
+    }
+
+    [Fact]
+    public async Task Triggers_of_an_encrypted_view_go_with_it()
+    {
+        var connectionString = await server.CreateDatabaseAsync($"encrypted_view_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(connectionString, """
+            CREATE TABLE dbo.accounts (id int NOT NULL PRIMARY KEY);
+            GO
+            CREATE VIEW dbo.secret_accounts WITH ENCRYPTION AS SELECT id FROM dbo.accounts;
+            GO
+            CREATE TRIGGER dbo.secret_accounts_insert ON dbo.secret_accounts INSTEAD OF INSERT AS BEGIN SET NOCOUNT ON; END;
+            GO
+            """);
+        var writer = new StringWriter();
+
+        var outcome = await _generator.GenerateAsync(connectionString, null, writer, EffectiveLimits.Default, Cancel);
+        var inventory = Assert.IsType<CatalogSucceeded<IReadOnlyList<InventoryItem>>>(
+            await _reader.InventoryAsync(connectionString, EffectiveLimits.Default, Cancel)).Value;
+
+        var scripted = Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value;
+        Assert.Equal(
+            [
+                new OmittedItem(new CatalogItem("dbo", "secret_accounts", "view"), Completeness.Encrypted),
+                new OmittedItem(new CatalogItem("dbo", "secret_accounts_insert", "trigger"), Completeness.OnEncryptedView),
+            ],
+            Completeness.Omitted(inventory, scripted).OrderBy(o => o.Item.Type, StringComparer.Ordinal).Reverse());
+        Assert.DoesNotContain("secret_accounts", writer.ToString(), StringComparison.Ordinal);
+        var copy = await server.CreateDatabaseAsync($"encrypted_view_copy_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(copy, writer.ToString());
+    }
+
+    [Fact]
+    public async Task A_chosen_table_type_that_shares_a_tables_name()
+    {
+        var (script, scripted) = await GenerateAsync([new ObjectSummary("crm", "address", ObjectType.TableType, null)]);
+
+        Assert.Equal([new CatalogItem("crm", "address", "table_type")], scripted);
+        Assert.Contains("CREATE TYPE [crm].[address] AS TABLE", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE TABLE", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Cancelled_part_way_through()
     {
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Cancel);

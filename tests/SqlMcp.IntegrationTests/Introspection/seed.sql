@@ -1,6 +1,6 @@
 -- A database holding every object type the introspection tools cover, plus the awkward cases: an encrypted
--- procedure, a database user, a database DDL trigger, a temporal table and a partitioned table. Names are written
--- in one consistent case, so the seed also runs on a case-sensitive collation.
+-- procedure, a database user, a database DDL trigger, a temporal table, a partitioned table, and the name clashes at
+-- the end. Names are written in one consistent case, so the seed also runs on a case-sensitive collation.
 
 CREATE SCHEMA sales;
 GO
@@ -94,4 +94,16 @@ BEGIN
 END;
 GO
 CREATE USER app_reader WITHOUT LOGIN;
+GO
+-- A table and a table type sharing one name (types are a namespace of their own), and two foreign keys sharing one
+-- name in different schemas, both referencing archive.orders.
+CREATE SCHEMA crm;
+GO
+CREATE TYPE crm.address AS TABLE (line nvarchar(100) NOT NULL);
+GO
+CREATE TABLE crm.address (id int NOT NULL CONSTRAINT pk_crm_address PRIMARY KEY, line nvarchar(100) NOT NULL);
+GO
+CREATE TABLE crm.returns (order_id int NOT NULL CONSTRAINT fk_returns_orders REFERENCES archive.orders (id));
+GO
+CREATE TABLE archive.returns (order_id int NOT NULL CONSTRAINT fk_returns_orders REFERENCES archive.orders (id));
 GO

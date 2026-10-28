@@ -242,6 +242,26 @@ public sealed class ToolCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Script_database_objects_are_names_or_names_with_a_type()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var schema = System.Text.Json.Nodes.JsonNode.Parse(Tool(session, ToolNames.ScriptDatabase).InputSchema.GetRawText())!;
+        var describeSchema = System.Text.Json.Nodes.JsonNode.Parse(Tool(session, ToolNames.DescribeObject).InputSchema.GetRawText())!;
+
+        Assert.Contains("\"array\"", schema["properties"]!["objects"]!["type"]!.ToJsonString(), StringComparison.Ordinal);
+        var oneOf = schema["properties"]!["objects"]!["items"]!["oneOf"]!.AsArray();
+        Assert.Equal("string", oneOf[0]!["type"]!.GetValue<string>());
+        Assert.Equal("""["name"]""", oneOf[1]!["required"]!.ToJsonString());
+        Assert.False(oneOf[1]!["additionalProperties"]!.GetValue<bool>());
+        Assert.Contains("table_type", oneOf[1]!["properties"]!["type"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Equal(["database"], schema["required"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.NotNull(describeSchema["properties"]!["type"]);
+        Assert.Equal(["database", "name"], describeSchema["required"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
     public void Paging_is_offered_with_command_alone()
     {
         _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");

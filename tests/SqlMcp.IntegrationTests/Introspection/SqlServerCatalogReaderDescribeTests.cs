@@ -260,6 +260,34 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
     }
 
     [Fact]
+    public async Task A_table_and_a_table_type_with_the_same_name()
+    {
+        var failed = await ResolveFails(seeded.ConnectionString, "crm.address");
+        var table = await _reader.DescribeAsync(seeded.ConnectionString, new ObjectName("crm", "address") { Type = ObjectType.Table }, EffectiveLimits.Default, Cancel);
+        var type = await _reader.DescribeAsync(seeded.ConnectionString, new ObjectName("crm", "address") { Type = ObjectType.TableType }, EffectiveLimits.Default, Cancel);
+
+        Assert.Equal(
+            "'crm.address' is ambiguous: it matches crm.address (table), crm.address (table_type), an object and a type with the same name. Give its type too, such as table_type.",
+            failed.Message);
+        var tableDetails = Assert.IsType<CatalogSucceeded<ObjectDetails>>(table).Value;
+        Assert.Equal((ObjectType.Table, "pk_crm_address"), (tableDetails.Type, tableDetails.PrimaryKey!.Name));
+        var typeDetails = Assert.IsType<CatalogSucceeded<ObjectDetails>>(type).Value;
+        Assert.Equal(ObjectType.TableType, typeDetails.Type);
+        Assert.Equal(["line"], typeDetails.Columns!.Select(c => c.Name));
+    }
+
+    [Fact]
+    public async Task Foreign_keys_with_the_same_name_in_two_schemas()
+    {
+        var orders = await Describe("archive.orders");
+
+        Assert.Equal(
+            [("fk_returns_orders", "archive.returns", "order_id"), ("fk_returns_orders", "crm.returns", "order_id")],
+            orders.ReferencedBy!.Select(k => (k.Name, k.Table, Assert.Single(k.Columns))).Order());
+        Assert.All(orders.ReferencedBy!, k => Assert.Equal(["id"], k.ReferencedColumns));
+    }
+
+    [Fact]
     public async Task Describe_an_unknown_object()
     {
         var outcome = await _reader.DescribeAsync(seeded.ConnectionString, new ObjectName("dbo", "nothing_here"), EffectiveLimits.Default, Cancel);

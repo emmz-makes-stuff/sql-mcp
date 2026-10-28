@@ -52,7 +52,7 @@ public sealed partial class ScriptRoundTripTests(SqlServerFixture server, Seeded
         Assert.Contains(rebuilt, o => o.Type == ObjectType.Table);
         foreach (var item in rebuilt)
         {
-            var name = new ObjectName(item.Schema, item.Name);
+            var name = new ObjectName(item.Schema, item.Name) { Type = item.Type };
             Assert.Equal(await DescribeAsync(seeded.ConnectionString, name), await DescribeAsync(copy, name));
         }
     }

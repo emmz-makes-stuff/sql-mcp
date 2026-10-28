@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using SqlMcp.Audit;
 using SqlMcp.Classification;
 using SqlMcp.Configuration;
@@ -71,82 +72,144 @@ internal sealed class ToolPipeline(SqlMcpSession session)
     public Task<ToolResult> ExecuteAsync(string database, string sql, CancellationToken cancellationToken) =>
         RunAsync(SqlTools.Execute, database, sql, cancellationToken);
 
-    public Task<ToolResult> ListObjectsAsync(string database, string? schema, IReadOnlyList<string>? types, string? pattern, CancellationToken cancellationToken)
-    {
-        if (!ObjectTypes.TryParseAll(types, out var parsed, out var error))
-        {
-            return Task.FromResult(ToolResult.Error(error!));
-        }
-
-        var filter = new ObjectFilter(Blank(schema), parsed, Blank(pattern));
-        return RunIntrospectionAsync(
+    public Task<ToolResult> ListObjectsAsync(string database, string? schema, IReadOnlyList<string?>? types, string? pattern, CancellationToken cancellationToken) =>
+        RunIntrospectionAsync(
             ToolNames.ListObjects,
             database,
-            filter.Describe(),
-            (engine, db, token) => engine.CatalogReader.ListAsync(db.Entry.ConnectionString!, filter, db.Limits, token),
+            () =>
+            {
+                if (!ObjectTypes.TryParseAll(types, out var parsed, out var error))
+                {
+                    return IntrospectionCall<ObjectList>.Refused(error!);
+                }
+
+                var filter = new ObjectFilter(Blank(schema), parsed, Blank(pattern));
+                return new(filter.Describe(), (engine, db, token) => engine.CatalogReader.ListAsync(db.Entry.ConnectionString!, filter, db.Limits, token));
+            },
             list => ToolResult.Ok(ObjectListResponse.From(list)),
             cancellationToken);
-    }
 
-    public Task<ToolResult> DescribeObjectAsync(string database, string name, CancellationToken cancellationToken)
-    {
-        if (!ObjectName.TryParse(name, out var parsed, out var error))
-        {
-            return Task.FromResult(ToolResult.Error(error));
-        }
-
-        return RunIntrospectionAsync(
+    /// <summary><paramref name="type"/> is needed only when an object and a type share the name (code review, 2026-10-28).</summary>
+    public Task<ToolResult> DescribeObjectAsync(string database, string name, string? type, CancellationToken cancellationToken) =>
+        RunIntrospectionAsync(
             ToolNames.DescribeObject,
             database,
-            [parsed.ToString()],
-            (engine, db, token) => engine.CatalogReader.DescribeAsync(db.Entry.ConnectionString!, parsed, db.Limits, token),
+            () => ParseName(name, Blank(type)) switch
+            {
+                (null, var error) => IntrospectionCall<ObjectDetails>.Refused(error!),
+                ({ } parsed, _) => new([parsed.ToRequest()], (engine, db, token) => engine.CatalogReader.DescribeAsync(db.Entry.ConnectionString!, parsed, db.Limits, token)),
+            },
             details => ToolResult.Ok(ObjectDetailsResponse.From(details)),
             cancellationToken);
-    }
 
     /// <summary>
     /// Scripts the whole database when <paramref name="objects"/> is left out, or the objects named. An empty list is
-    /// refused rather than read as "everything" (Emmz's call, 2026-10-28). Every name is parsed here and resolved by
-    /// the scripter before any file is created.
+    /// refused rather than read as "everything" (Emmz's call, 2026-10-28). Each entry is a name, or
+    /// <c>{"name": …, "type": …}</c> (Emmz's call, 2026-10-28). Every name is parsed here and resolved by the scripter
+    /// before any file is created.
     /// </summary>
-    public Task<ToolResult> ScriptDatabaseAsync(string database, IReadOnlyList<string>? objects, CancellationToken cancellationToken)
-    {
-        List<ObjectName>? names = null;
-        if (objects is { Count: 0 })
-        {
-            return Task.FromResult(ToolResult.Error("objects is empty. Name at least one object, or leave objects out to script the whole database."));
-        }
-
-        if (objects is not null)
-        {
-            names = [];
-            foreach (var text in objects)
-            {
-                if (!ObjectName.TryParse(text, out var parsed, out var error))
-                {
-                    return Task.FromResult(ToolResult.Error(error));
-                }
-
-                names.Add(parsed);
-            }
-        }
-
-        return RunIntrospectionAsync(
+    public Task<ToolResult> ScriptDatabaseAsync(string database, IReadOnlyList<JsonElement>? objects, CancellationToken cancellationToken) =>
+        RunIntrospectionAsync(
             ToolNames.ScriptDatabase,
             database,
-            names?.Select(n => n.ToString()).ToList() ?? [],
-            (engine, db, token) => DatabaseScripter.ScriptAsync(
-                engine.CatalogReader,
-                engine.ScriptGenerator,
-                db.Entry.ConnectionString!,
-                names,
-                new ScriptTarget(session.ProjectDirectory, session.ScriptsFallbackDirectory, db.Identifier, session.Version, session.Time),
-                db.Limits,
-                token),
+            () =>
+            {
+                List<ObjectName>? names = null;
+                if (objects is { Count: 0 })
+                {
+                    return IntrospectionCall<ScriptResult>.Refused("objects is empty. Name at least one object, or leave objects out to script the whole database.");
+                }
+
+                if (objects is not null)
+                {
+                    names = [];
+                    foreach (var entry in objects)
+                    {
+                        var (parsed, error) = ParseObjectsEntry(entry);
+                        if (parsed is null)
+                        {
+                            return IntrospectionCall<ScriptResult>.Refused(error!);
+                        }
+
+                        names.Add(parsed);
+                    }
+                }
+
+                return new(
+                    names?.Select(n => n.ToRequest()).ToList() ?? [],
+                    (engine, db, token) => DatabaseScripter.ScriptAsync(
+                        engine.CatalogReader,
+                        engine.ScriptGenerator,
+                        db.Entry.ConnectionString!,
+                        names,
+                        new ScriptTarget(session.ProjectDirectory, session.ScriptsFallbackDirectory, db.Identifier, session.Version, session.Time),
+                        db.Limits,
+                        token));
+            },
             script => ToolResult.Ok(ScriptResponse.From(script)),
             cancellationToken,
             (script, auditEvent) => auditEvent with { ScriptPath = script.Path, Counts = script.Counts, OmittedCount = script.Omitted.Count },
             script => DeleteUnlogged(script.Path, session.Diagnostics));
+
+    /// <summary>One <c>script_database</c> objects entry: a name as a string, or an object with <c>name</c> and an optional <c>type</c>.</summary>
+    private static (ObjectName? Name, string? Error) ParseObjectsEntry(JsonElement entry)
+    {
+        const string Shape = "Each objects entry is a name such as \"dbo.orders\", or {\"name\": \"dbo.address\", \"type\": \"table_type\"}.";
+        switch (entry.ValueKind)
+        {
+            case JsonValueKind.String:
+                return ParseName(entry.GetString(), null);
+            case JsonValueKind.Object:
+                if (!entry.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String)
+                {
+                    return (null, $"An objects entry has no name. {Shape}");
+                }
+
+                foreach (var property in entry.EnumerateObject())
+                {
+                    if (property.Name is not ("name" or "type"))
+                    {
+                        return (null, $"An objects entry has '{property.Name}', which isn't name or type. {Shape}");
+                    }
+                }
+
+                if (!entry.TryGetProperty("type", out var type) || type.ValueKind == JsonValueKind.Null)
+                {
+                    return ParseName(name.GetString(), null);
+                }
+
+                return type.ValueKind == JsonValueKind.String
+                    ? ParseName(name.GetString(), Blank(type.GetString()))
+                    : (null, ObjectTypes.NotAType(type.GetRawText()));
+            default:
+                return (null, $"An objects entry is {entry.GetRawText()}. {Shape}");
+        }
+    }
+
+    /// <summary>A name, with the type that tells it apart from a type of the same name when one is given.</summary>
+    private static (ObjectName? Name, string? Error) ParseName(string? text, string? type)
+    {
+        if (!ObjectName.TryParse(text, out var parsed, out var error))
+        {
+            return (null, error);
+        }
+
+        if (type is null)
+        {
+            return (parsed, null);
+        }
+
+        return ObjectTypes.TryParse(type, out var objectType) ? (parsed with { Type = objectType }, null) : (null, ObjectTypes.NotAType(type));
+    }
+
+    /// <summary>
+    /// What an introspection call does once its arguments are valid: the request as the audit log records it, and the
+    /// read. <see cref="Error"/> is set instead when an argument is invalid.
+    /// </summary>
+    private sealed record IntrospectionCall<T>(
+        IReadOnlyList<string> Request, Func<EngineServices, EffectiveDatabase, CancellationToken, Task<CatalogOutcome<T>>>? Read, string? Error = null)
+    {
+        public static IntrospectionCall<T> Refused(string error) => new([], null, error);
     }
 
     /// <summary>
@@ -167,7 +230,9 @@ internal sealed class ToolPipeline(SqlMcpSession session)
 
     /// <summary>
     /// The flow every introspection tool shares, in the order <see cref="RunAsync"/> uses (design I7):
-    /// <c>audit ok? → resolve db → introspection allowed? → available? → read → audit → respond</c>. There's no
+    /// <c>audit ok? → resolve db → introspection allowed? → available? → arguments valid? → read → audit → respond</c>.
+    /// The arguments are checked only after the grant, so a call on a denied database is audited as denied whatever it
+    /// passed (code review, 2026-10-28); an invalid argument is refused unlogged, as an unknown database is. There's no
     /// classifier step: the reader runs fixed catalog queries, never the agent's SQL. A call that reads the catalog
     /// is logged as one <c>introspection</c> event, succeeded or not. <paramref name="describe"/> adds a success's
     /// details to its event; if that event can't be logged, <paramref name="discard"/> undoes what the call left
@@ -176,8 +241,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
     private async Task<ToolResult> RunIntrospectionAsync<T>(
         string tool,
         string database,
-        IReadOnlyList<string> request,
-        Func<EngineServices, EffectiveDatabase, CancellationToken, Task<CatalogOutcome<T>>> read,
+        Func<IntrospectionCall<T>> prepare,
         Func<T, ToolResult> respond,
         CancellationToken cancellationToken,
         Func<T, IntrospectionEvent, IntrospectionEvent>? describe = null,
@@ -204,6 +268,14 @@ internal sealed class ToolPipeline(SqlMcpSession session)
         {
             return ToolResult.Error($"{db.Identifier} is unavailable: {db.Entry.UnavailableReason}");
         }
+
+        var call = prepare();
+        if (call.Read is not { } read)
+        {
+            return ToolResult.Error(call.Error!);
+        }
+
+        var request = call.Request;
 
         var engine = session.Engines[db.Entry.Engine];
         CatalogOutcome<T> outcome;

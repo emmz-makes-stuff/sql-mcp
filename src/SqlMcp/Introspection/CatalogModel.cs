@@ -37,11 +37,11 @@ internal static class ObjectTypes
 
     public static string ToWireName(this ObjectType type) => Names[type];
 
-    public static bool TryParse(string name, out ObjectType type)
+    public static bool TryParse(string? name, out ObjectType type)
     {
         foreach (var (candidate, wire) in Names)
         {
-            if (string.Equals(wire, name.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (name is not null && string.Equals(wire, name.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 type = candidate;
                 return true;
@@ -56,7 +56,7 @@ internal static class ObjectTypes
     /// Parses a type filter. Null or empty means every type. Fails on the first unknown name, with a message that
     /// lists the valid ones (spec: unknown object type).
     /// </summary>
-    public static bool TryParseAll(IReadOnlyList<string>? names, out IReadOnlyList<ObjectType> types, out string? error)
+    public static bool TryParseAll(IReadOnlyList<string?>? names, out IReadOnlyList<ObjectType> types, out string? error)
     {
         var parsed = new List<ObjectType>();
         foreach (var name in names ?? [])
@@ -64,7 +64,7 @@ internal static class ObjectTypes
             if (!TryParse(name, out var type))
             {
                 types = [];
-                error = $"'{name}' is not an object type. Use one of: {string.Join(", ", WireNames)}.";
+                error = NotAType(name);
                 return false;
             }
 
@@ -75,6 +75,9 @@ internal static class ObjectTypes
         error = null;
         return true;
     }
+
+    /// <summary>The message for a type name that isn't one, listing the valid ones. A null shows as <c>null</c>.</summary>
+    public static string NotAType(string? name) => $"'{name ?? "null"}' is not an object type. Use one of: {string.Join(", ", WireNames)}.";
 }
 
 /// <summary>One object in a listing. <see cref="Schema"/> is null for a database-level trigger.</summary>
@@ -115,9 +118,13 @@ internal sealed record ObjectList(IReadOnlyList<ObjectSummary> Objects, int Tota
 /// <summary>
 /// An object name as an agent gives it: <c>schema.name</c> or a bare <c>name</c>, with or without brackets or double
 /// quotes. A name with a database or server part is refused, as the write tools refuse them (design I4).
+/// <see cref="Type"/> is given only to tell apart an object and a type that share a name, such as a table and a table
+/// type: types are a namespace of their own.
 /// </summary>
 internal sealed record ObjectName(string? Schema, string Name)
 {
+    public ObjectType? Type { get; init; }
+
     /// <summary>
     /// Parses <paramref name="text"/> with ScriptDom, which unquotes <c>[dbo].[orders]</c> and <c>"dbo"."orders"</c>.
     /// On failure, <paramref name="error"/> is a message for the agent.
@@ -157,6 +164,9 @@ internal sealed record ObjectName(string? Schema, string Name)
 
     /// <summary>The name as the audit log and messages show it: <c>schema.name</c>, or <c>name</c> when unqualified.</summary>
     public override string ToString() => Schema is null ? Name : $"{Schema}.{Name}";
+
+    /// <summary>The name as the audit log records it: with its type in brackets when one was given, such as <c>dbo.address (table_type)</c>.</summary>
+    public string ToRequest() => Type is { } type ? $"{this} ({type.ToWireName()})" : ToString();
 }
 
 /// <summary>
@@ -167,8 +177,10 @@ internal static class NameResolution
 {
     public static string? Problem(ObjectName name, IReadOnlyList<ObjectSummary> candidates) => candidates.Count switch
     {
-        0 => $"No object named '{name}' was found. Use list_objects to find it; only objects this database login can see are found.",
+        0 => $"No {(name.Type is { } type ? type.ToWireName() : "object")} named '{name}' was found. Use list_objects to find it; only objects this database login can see are found.",
         1 => null,
+        _ when candidates.Select(c => c.Schema).Distinct().Count() == 1 =>
+            $"'{name}' is ambiguous: it matches {string.Join(", ", candidates.Select(Describe))}, an object and a type with the same name. Give its type too, such as {candidates[^1].Type.ToWireName()}.",
         _ => $"'{name}' is ambiguous: it matches {string.Join(", ", candidates.Select(Describe))}. Give a schema-qualified name, such as {Example(candidates)}.",
     };
 

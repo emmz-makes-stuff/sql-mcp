@@ -22,6 +22,7 @@ public sealed class SqlServerCatalogReaderInventoryTests(SqlServerFixture server
         [
             .. SqlServerCatalogReaderListTests.AllSeeded,
             "-.archive:schema",
+            "-.crm:schema",
             "-.sales:schema",
             "-.pf_events:partition_function",
             "-.ps_events:partition_scheme",
@@ -83,6 +84,37 @@ public sealed class SqlServerCatalogReaderInventoryTests(SqlServerFixture server
                 new InventoryItem(new CatalogItem(null, "signing", CatalogItemTypes.Certificate), InventoryClass.SecurityObject),
             ],
             Assert.IsType<CatalogSucceeded<IReadOnlyList<InventoryItem>>>(outcome).Value);
+    }
+
+    [Fact]
+    public async Task A_dml_trigger_carries_its_table()
+    {
+        var inventory = await InventoryAsync(caseSensitive: false);
+
+        Assert.Equal(new CatalogItem("dbo", "orders", "table"), inventory.Single(i => i.Item.Name == "orders_status").Parent);
+        Assert.Null(inventory.Single(i => i.Item.Name == "audit_ddl").Parent);
+        Assert.Null(inventory.Single(i => i.Item == new CatalogItem("dbo", "orders", "table")).Parent);
+    }
+
+    [Fact]
+    public async Task Encrypted_database_trigger()
+    {
+        var connectionString = await server.CreateDatabaseAsync($"ddl_trigger_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(connectionString, """
+            CREATE TRIGGER secret_ddl ON DATABASE WITH ENCRYPTION FOR CREATE_TABLE AS BEGIN SET NOCOUNT ON; END;
+            GO
+            CREATE TRIGGER plain_ddl ON DATABASE FOR CREATE_VIEW AS BEGIN SET NOCOUNT ON; END;
+            GO
+            """);
+
+        var inventory = Assert.IsType<CatalogSucceeded<IReadOnlyList<InventoryItem>>>(
+            await _reader.InventoryAsync(connectionString, EffectiveLimits.Default, Cancel)).Value;
+        var secret = await _reader.DescribeAsync(connectionString, new ObjectName(null, "secret_ddl"), EffectiveLimits.Default, Cancel);
+        var plain = await _reader.DescribeAsync(connectionString, new ObjectName(null, "plain_ddl"), EffectiveLimits.Default, Cancel);
+
+        Assert.Equal(["secret_ddl"], inventory.Where(i => i.Encrypted).Select(i => i.Item.Name));
+        Assert.Equal(new Definition.Unavailable(Definition.Encrypted), Assert.IsType<CatalogSucceeded<ObjectDetails>>(secret).Value.Definition);
+        Assert.IsType<Definition.Text>(Assert.IsType<CatalogSucceeded<ObjectDetails>>(plain).Value.Definition);
     }
 
     private async Task<IReadOnlyList<InventoryItem>> InventoryAsync(bool caseSensitive)

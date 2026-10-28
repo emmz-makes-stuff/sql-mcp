@@ -25,6 +25,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// engine-neutral names; CLR procedures, functions, aggregates and triggers count as their T-SQL kind.
     /// <c>id</c> is what the describe queries look the object up by: the object id, a table type's table object id,
     /// or an alias type's user type id. <c>code</c> is <c>sys.objects.type</c>, or <c>TT</c>/<c>UT</c> for types.
+    /// <c>parent_id</c> is a DML trigger's table or view, and 0 or NULL for everything else.
     /// </summary>
     private const string ObjectsCte = """
         WITH objects AS (
@@ -39,7 +40,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                 CASE WHEN o.type = 'U'
                     THEN (SELECT SUM(p.rows) FROM sys.partitions AS p WHERE p.object_id = o.object_id AND p.index_id IN (0, 1))
                 END AS approx_rows,
-                o.object_id AS id, CAST(o.type AS varchar(2)) AS code
+                o.object_id AS id, CAST(o.type AS varchar(2)) AS code, o.parent_object_id AS parent_id
             FROM sys.objects AS o
             JOIN sys.schemas AS s ON s.schema_id = o.schema_id
             WHERE o.is_ms_shipped = 0
@@ -47,13 +48,13 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
               AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA')
             UNION ALL
             SELECT s.name, t.name, CASE WHEN t.is_table_type = 1 THEN 'table_type' ELSE 'type' END, NULL,
-                COALESCE(tt.type_table_object_id, t.user_type_id), CASE WHEN t.is_table_type = 1 THEN 'TT' ELSE 'UT' END
+                COALESCE(tt.type_table_object_id, t.user_type_id), CASE WHEN t.is_table_type = 1 THEN 'TT' ELSE 'UT' END, NULL
             FROM sys.types AS t
             JOIN sys.schemas AS s ON s.schema_id = t.schema_id
             LEFT JOIN sys.table_types AS tt ON tt.user_type_id = t.user_type_id
             WHERE t.is_user_defined = 1
             UNION ALL
-            SELECT NULL, tr.name, 'trigger', NULL, tr.object_id, CAST(tr.type AS varchar(2))
+            SELECT NULL, tr.name, 'trigger', NULL, tr.object_id, CAST(tr.type AS varchar(2)), NULL
             FROM sys.triggers AS tr
             WHERE tr.parent_class = 0 AND tr.is_ms_shipped = 0
         )
@@ -61,8 +62,9 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 
     /// <summary>
     /// The filters compare through <c>LOWER()</c>, so a case-sensitive database collation still matches without regard
-    /// to case. <c>COUNT(*) OVER ()</c> is computed before <c>TOP</c>, so it counts every match. The type list is matched
-    /// with <c>CHARINDEX</c>, not <c>STRING_SPLIT</c>, which a database below compatibility level 130 doesn't have.
+    /// to case. <c>COUNT(*) OVER ()</c> is computed before <c>TOP</c>, so it counts every match. The sort ends on the
+    /// type, since a table and a table type can share a name. The type list is matched with <c>CHARINDEX</c>, not
+    /// <c>STRING_SPLIT</c>, which a database below compatibility level 130 doesn't have.
     /// </summary>
     private const string ListSql = ObjectsCte + """
         SELECT TOP (@cap) schema_name, name, type, approx_rows, COUNT(*) OVER () AS total
@@ -70,17 +72,18 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         WHERE (@schema IS NULL OR LOWER(schema_name) = LOWER(@schema))
           AND (@pattern IS NULL OR LOWER(name) LIKE LOWER(@pattern) ESCAPE '\')
           AND (@types IS NULL OR CHARINDEX(',' + type + ',', ',' + @types + ',') > 0)
-        ORDER BY schema_name, name;
+        ORDER BY schema_name, name, type;
         """;
 
     /// <summary>
     /// The objects one name could mean. Unlike the list filters, names compare as the database compares them, so on a
-    /// case-sensitive database <c>dbo.Orders</c> and <c>dbo.orders</c> are different objects, as they are to SQL.
+    /// case-sensitive database <c>dbo.Orders</c> and <c>dbo.orders</c> are different objects, as they are to SQL. Types
+    /// are a namespace of their own, so a table and a table type can share a name; <c>@type</c> tells them apart.
     /// </summary>
     private const string ResolveSql = ObjectsCte + """
         SELECT schema_name, name, type, id, code
         FROM objects
-        WHERE name = @name AND (@schema IS NULL OR schema_name = @schema)
+        WHERE name = @name AND (@schema IS NULL OR schema_name = @schema) AND (@type IS NULL OR type = @type)
         ORDER BY schema_name, type;
         """;
 
@@ -93,53 +96,74 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// Each principal holding explicit permissions gets a <c>permissions</c> entry, so the omitted list names them: the
     /// defaults every database has (a user's CONNECT, public's grants on system objects and on column key definitions)
     /// don't count.
-    /// Encryption is read for <c>sys.objects</c> modules only, so an encrypted database trigger reads as unencrypted.
+    /// A DML trigger carries its table or view, so a script of chosen objects can account for their triggers, and the
+    /// omitted list can say a trigger went with its encrypted view. A database trigger isn't in <c>sys.objects</c>, so
+    /// its encryption is read as <see cref="EncryptedDatabaseTrigger"/> reads it.
     /// </summary>
-    private const string InventorySql = ObjectsCte + """
+    private const string InventorySql = ObjectsCte + $"""
         , inventory AS (
             SELECT schema_name, name, type, 0 AS class,
-                CAST(CASE WHEN code NOT IN ('TT', 'UT') AND OBJECTPROPERTY(id, 'IsEncrypted') = 1 THEN 1 ELSE 0 END AS bit) AS encrypted
+                CAST(CASE
+                    WHEN schema_name IS NULL THEN CASE WHEN {EncryptedDatabaseTrigger} THEN 1 ELSE 0 END
+                    WHEN code NOT IN ('TT', 'UT') AND OBJECTPROPERTY(id, 'IsEncrypted') = 1 THEN 1
+                    ELSE 0
+                END AS bit) AS encrypted,
+                parent_id
             FROM objects
             UNION ALL
-            SELECT s.name, o.name, LOWER(o.type_desc) COLLATE DATABASE_DEFAULT, 0, CAST(0 AS bit)
+            SELECT s.name, o.name, LOWER(o.type_desc) COLLATE DATABASE_DEFAULT, 0, CAST(0 AS bit), NULL
             FROM sys.objects AS o
             JOIN sys.schemas AS s ON s.schema_id = o.schema_id
             WHERE o.is_ms_shipped = 0 AND o.parent_object_id = 0
               AND o.type NOT IN ('U', 'V', 'P', 'PC', 'FN', 'IF', 'TF', 'FS', 'FT', 'AF', 'TR', 'TA', 'SO', 'SN', 'TT', 'S', 'IT')
               AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA')
             UNION ALL
-            SELECT NULL, name, 'schema', 0, CAST(0 AS bit) FROM sys.schemas WHERE schema_id BETWEEN 5 AND 16383
+            SELECT NULL, name, 'schema', 0, CAST(0 AS bit), NULL FROM sys.schemas WHERE schema_id BETWEEN 5 AND 16383
             UNION ALL
-            SELECT NULL, name, 'partition_function', 0, CAST(0 AS bit) FROM sys.partition_functions
+            SELECT NULL, name, 'partition_function', 0, CAST(0 AS bit), NULL FROM sys.partition_functions
             UNION ALL
-            SELECT NULL, name, 'partition_scheme', 0, CAST(0 AS bit) FROM sys.partition_schemes
+            SELECT NULL, name, 'partition_scheme', 0, CAST(0 AS bit), NULL FROM sys.partition_schemes
             UNION ALL
-            SELECT SCHEMA_NAME(schema_id), name, 'xml_schema_collection', 0, CAST(0 AS bit)
+            SELECT SCHEMA_NAME(schema_id), name, 'xml_schema_collection', 0, CAST(0 AS bit), NULL
             FROM sys.xml_schema_collections WHERE SCHEMA_NAME(schema_id) <> 'sys'
             UNION ALL
-            SELECT NULL, name, 'assembly', 0, CAST(0 AS bit) FROM sys.assemblies WHERE is_user_defined = 1
+            SELECT NULL, name, 'assembly', 0, CAST(0 AS bit), NULL FROM sys.assemblies WHERE is_user_defined = 1
             UNION ALL
-            SELECT NULL, name, 'fulltext_catalog', 0, CAST(0 AS bit) FROM sys.fulltext_catalogs
+            SELECT NULL, name, 'fulltext_catalog', 0, CAST(0 AS bit), NULL FROM sys.fulltext_catalogs
             UNION ALL
-            SELECT NULL, name, CASE type WHEN 'R' THEN 'role' WHEN 'A' THEN 'application_role' ELSE 'user' END, 1, CAST(0 AS bit)
+            SELECT NULL, name, CASE type WHEN 'R' THEN 'role' WHEN 'A' THEN 'application_role' ELSE 'user' END, 1, CAST(0 AS bit), NULL
             FROM sys.database_principals WHERE principal_id >= 5 AND is_fixed_role = 0
             UNION ALL
-            SELECT DISTINCT NULL, pr.name, 'permissions', 1, CAST(0 AS bit)
+            SELECT DISTINCT NULL, pr.name, 'permissions', 1, CAST(0 AS bit), NULL
             FROM sys.database_permissions AS p
             JOIN sys.database_principals AS pr ON pr.principal_id = p.grantee_principal_id
             WHERE NOT (p.class = 0 AND p.permission_name = 'CONNECT' AND p.state = 'G')
               AND NOT (pr.principal_id = 0 AND p.state = 'G' AND (p.class = 1 AND p.major_id < 0
                   OR p.class = 0 AND p.permission_name IN ('VIEW ANY COLUMN ENCRYPTION KEY DEFINITION', 'VIEW ANY COLUMN MASTER KEY DEFINITION')))
             UNION ALL
-            SELECT NULL, name, 'certificate', 2, CAST(0 AS bit) FROM sys.certificates
+            SELECT NULL, name, 'certificate', 2, CAST(0 AS bit), NULL FROM sys.certificates
             UNION ALL
-            SELECT NULL, name, 'asymmetric_key', 2, CAST(0 AS bit) FROM sys.asymmetric_keys
+            SELECT NULL, name, 'asymmetric_key', 2, CAST(0 AS bit), NULL FROM sys.asymmetric_keys
             UNION ALL
-            SELECT NULL, name, 'symmetric_key', 2, CAST(0 AS bit) FROM sys.symmetric_keys
+            SELECT NULL, name, 'symmetric_key', 2, CAST(0 AS bit), NULL FROM sys.symmetric_keys
             UNION ALL
-            SELECT NULL, name, 'database_scoped_credential', 2, CAST(0 AS bit) FROM sys.database_scoped_credentials
+            SELECT NULL, name, 'database_scoped_credential', 2, CAST(0 AS bit), NULL FROM sys.database_scoped_credentials
         )
-        SELECT schema_name, name, type, class, encrypted FROM inventory ORDER BY class, type, schema_name, name;
+        SELECT i.schema_name, i.name, i.type, i.class, i.encrypted, p.schema_name, p.name, p.type
+        FROM inventory AS i
+        LEFT JOIN objects AS p ON p.id = i.parent_id AND i.parent_id <> 0 AND p.code NOT IN ('TT', 'UT')
+        ORDER BY i.class, i.type, i.schema_name, i.name;
+        """;
+
+    /// <summary>
+    /// Whether the database trigger whose object id is <c>id</c> is encrypted. <c>OBJECTPROPERTY</c> has no answer for
+    /// one, but <c>sys.sql_modules</c> gives a NULL definition for an encrypted module, and otherwise only to a login
+    /// without VIEW DEFINITION. So with VIEW DEFINITION on the database, a NULL definition means encrypted; without
+    /// it, the trigger can't be told from one the login may not read.
+    /// </summary>
+    private const string EncryptedDatabaseTrigger = """
+        (EXISTS (SELECT 1 FROM sys.sql_modules AS dm WHERE dm.object_id = id AND dm.definition IS NULL)
+            AND HAS_PERMS_BY_NAME(NULL, 'DATABASE', 'VIEW DEFINITION') = 1)
         """;
 
     /// <summary>A column's or parameter's type, as <see cref="SqlServerTypeNames.Format"/> takes it.</summary>
@@ -187,13 +211,17 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         SELECT name FROM sys.triggers WHERE parent_id = @id ORDER BY name;
         """;
 
-    /// <summary>Both directions at once: a key that references its own table is in both lists.</summary>
+    /// <summary>
+    /// Both directions at once: a key that references its own table is in both lists. A key's name is unique only in
+    /// its schema, so keys are told apart by <c>object_id</c>, and same-named keys are sorted by the table declaring them.
+    /// </summary>
     private const string ForeignKeysSql = """
         SELECT fk.name,
             SCHEMA_NAME(pt.schema_id) + '.' + pt.name, SCHEMA_NAME(rt.schema_id) + '.' + rt.name,
             fk.delete_referential_action, fk.update_referential_action, pc.name, rc.name,
             CAST(CASE WHEN fk.parent_object_id = @id THEN 1 ELSE 0 END AS bit),
-            CAST(CASE WHEN fk.referenced_object_id = @id THEN 1 ELSE 0 END AS bit)
+            CAST(CASE WHEN fk.referenced_object_id = @id THEN 1 ELSE 0 END AS bit),
+            fk.object_id
         FROM sys.foreign_keys AS fk
         JOIN sys.objects AS pt ON pt.object_id = fk.parent_object_id
         JOIN sys.objects AS rt ON rt.object_id = fk.referenced_object_id
@@ -201,7 +229,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         JOIN sys.columns AS pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
         JOIN sys.columns AS rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
         WHERE fk.parent_object_id = @id OR fk.referenced_object_id = @id
-        ORDER BY fk.name, fkc.constraint_column_id;
+        ORDER BY fk.name, SCHEMA_NAME(pt.schema_id), pt.name, fk.object_id, fkc.constraint_column_id;
         """;
 
     private const string TemporalSql = """
@@ -216,11 +244,11 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 
     /// <summary>
     /// The definition, and why it's missing when it is. <c>OBJECTPROPERTY</c> has no answer for a database trigger,
-    /// which isn't in <c>sys.objects</c>, so an encrypted one reads as "no permission".
+    /// which isn't in <c>sys.objects</c>, so its encryption is read as <see cref="EncryptedDatabaseTrigger"/> reads it.
     /// </summary>
-    private const string DefinitionSql = """
+    private const string DefinitionSql = $"""
         SELECT m.definition,
-            CAST(COALESCE(OBJECTPROPERTY(x.id, 'IsEncrypted'), 0) AS bit),
+            CAST(COALESCE(OBJECTPROPERTY(x.id, 'IsEncrypted'), CASE WHEN {EncryptedDatabaseTrigger} THEN 1 ELSE 0 END) AS bit),
             CAST(CASE WHEN EXISTS (SELECT 1 FROM sys.assembly_modules AS a WHERE a.object_id = x.id) THEN 1 ELSE 0 END AS bit)
         FROM (VALUES (@id)) AS x (id)
         LEFT JOIN sys.sql_modules AS m ON m.object_id = x.id;
@@ -320,7 +348,10 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                 items.Add(new InventoryItem(
                     new CatalogItem(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetString(1), reader.GetString(2)),
                     (InventoryClass)reader.GetInt32(3),
-                    reader.GetBoolean(4)));
+                    reader.GetBoolean(4))
+                {
+                    Parent = reader.IsDBNull(6) ? null : new CatalogItem(reader.IsDBNull(5) ? null : reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                });
             }
 
             return items;
@@ -349,6 +380,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             await using var command = Command(connection, ResolveSql, limits);
             command.Parameters.Add(Text("@schema", name.Schema));
             command.Parameters.Add(Text("@name", name.Name));
+            command.Parameters.Add(Text("@type", name.Type?.ToWireName()));
             var candidates = new List<Resolved>();
             await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -381,11 +413,11 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             var keys = await RowsAsync(KeysSql, r => (Name: r.GetString(0), Type: r.GetString(1).Trim(), Clustered: r.GetByte(2) == 1, Column: Column(r, 3, 4))).ConfigureAwait(false);
             var foreignKeys = await RowsAsync(ForeignKeysSql, r => (
                 Name: r.GetString(0), Table: r.GetString(1), Referenced: r.GetString(2), OnDelete: Action(r.GetByte(3)), OnUpdate: Action(r.GetByte(4)),
-                Column: r.GetString(5), ReferencedColumn: r.GetString(6), Declares: r.GetBoolean(7), IsReferenced: r.GetBoolean(8))).ConfigureAwait(false);
+                Column: r.GetString(5), ReferencedColumn: r.GetString(6), Declares: r.GetBoolean(7), IsReferenced: r.GetBoolean(8), Id: r.GetInt32(9))).ConfigureAwait(false);
             var foreignKeyDetails = foreignKeys
-                .GroupBy(k => k.Name)
+                .GroupBy(k => k.Id)
                 .Select(g => (Key: g.First(), Details: new ForeignKeyDetails(
-                    g.Key, g.First().Table, [.. g.Select(k => k.Column)], g.First().Referenced, [.. g.Select(k => k.ReferencedColumn)], g.First().OnDelete, g.First().OnUpdate)))
+                    g.First().Name, g.First().Table, [.. g.Select(k => k.Column)], g.First().Referenced, [.. g.Select(k => k.ReferencedColumn)], g.First().OnDelete, g.First().OnUpdate)))
                 .ToList();
 
             return details with

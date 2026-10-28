@@ -156,12 +156,13 @@ type, and the objects it left out. The script text never goes through the MCP re
   the schema in dependency order, with batches separated by `GO` lines. There's no data and no `CREATE DATABASE`:
   run it in an existing, empty database.
 - **Chosen objects:** given a list of names, it scripts only those objects, with their own keys, indexes and
-  triggers, and not the objects they depend on. If any name isn't found, no file is written. Its omitted list
-  covers only the objects named: an encrypted trigger on a chosen table is left out without being listed.
+  triggers, and not the objects they depend on. An entry is a name, or `{"name": …, "type": …}` when a table and a
+  table type (say) share a name. If any name isn't found, no file is written. Its omitted list covers only the
+  objects named and their own triggers, such as an encrypted trigger on a chosen table.
 - **What is omitted:** for a whole database, everything the catalog holds is either scripted or listed as omitted,
   with the reason: users, roles, application roles and permissions (security principals); certificates, keys and
-  database-scoped credentials (security objects); encrypted definitions; and anything else the generator doesn't
-  script.
+  database-scoped credentials (security objects); encrypted definitions, and the triggers of an encrypted view; and
+  anything else the generator doesn't script.
 - **Differences after a round trip:** SQL Server names a table type's constraints itself, so they get new names. A
   DML trigger's `CREATE TRIGGER … AS` header is rewritten bracketed and schema-qualified, and its body is kept as
   written.

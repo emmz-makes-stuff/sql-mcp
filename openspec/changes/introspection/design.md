@@ -65,8 +65,10 @@ one record with optional parts (columns, keys, indexes, foreign keys, triggers, 
 synonym target, base type, temporal). Only the parts that apply to the type are filled in, and empty parts are left
 out of the JSON. A definition is either text or `{ "unavailable": "<reason>" }`. The reason is `encrypted`; `clr`
 for a CLR routine, which has no T-SQL definition; or `no permission` when `sys.sql_modules.definition` is NULL for any
-other reason. A database trigger isn't in `sys.objects`, so its encryption can't be read, and an encrypted one reports
-`no permission`.
+other reason. A database trigger isn't in `sys.objects`, so `OBJECTPROPERTY` can't say whether it is encrypted. Its
+NULL definition counts as `encrypted` when the login has VIEW DEFINITION on the database, and as `no permission`
+otherwise. `describe_object` takes an optional type, because types are named apart from other objects: a table and a
+table type can share a `schema.name`.
 
 ### I4. Catalog reads
 - One connection per call, opened from the same effective connection string the executor builds. Every command
@@ -100,11 +102,13 @@ other reason. A database trigger isn't in `sys.objects`, so its encryption can't
      catalog;
   2. everything else that has a create order, ordered by `DependencyWalker`. The walk adds parents that weren't
      asked for and repeats some nodes, so it is filtered back down to the candidates, first place kept;
-  3. the non-encrypted DML triggers of every table and view, last.
+  3. the non-encrypted DML triggers of every table and non-encrypted view, last. An encrypted view's triggers are
+     left out with it, and omitted as `on an encrypted view`.
 - Chosen objects: the same walk, filtered down to the chosen set. This keeps the FK order between them (for
   example `orders` before `order_lines`) without adding any dependency. A chosen table or view brings its own DML
   triggers, in part 3; a chosen trigger goes there too. Encrypted chosen modules are left out, and the omitted list
-  names them.
+  names them. The inventory is narrowed to the chosen objects and their own DML triggers (each inventory trigger
+  carries its parent), so an encrypted trigger of a chosen table is named too.
 - The generator returns the items it scripted. `Completeness` compares them with `ICatalogReader.InventoryAsync`,
   which covers:
   - `sys.objects`, user types, partition functions and schemes, XML schema collections, user assemblies, and
@@ -112,7 +116,8 @@ other reason. A database trigger isn't in `sys.objects`, so its encryption can't
   - for the omitted list only: database principals, certificates, keys and database-scoped credentials.
 
   Anything in the inventory that wasn't scripted is omitted, with one of these reasons: `encrypted`,
-  `security principal`, `security object`, or `not scripted by the generator` for anything SMO skipped.
+  `on an encrypted view`, `security principal`, `security object`, or `not scripted by the generator` for anything
+  SMO skipped.
 - SMO is synchronous. It runs on `Task.Run`, and the cancellation token is checked between the objects
   `EnumScriptWithList` yields.
 
@@ -140,9 +145,12 @@ other reason. A database trigger isn't in `sys.objects`, so its encryption can't
   2. an unknown database;
   3. a grant check, which writes a `denied` event;
   4. an unavailable database;
-  5. the call itself;
-  6. the `introspection` event;
-  7. the response.
+  5. the arguments (names, types, the objects list), refused unlogged if invalid, as an unknown database is;
+  6. the call itself;
+  7. the `introspection` event;
+  8. the response.
+
+  The arguments come after the grant, so a call on a denied database is audited as denied whatever it passed.
 
   There's no classifier step, because no agent SQL runs.
 - `IntrospectionEvent` becomes `(Tool, Database, Request, DurationMs, Succeeded)`, and a failure adds `Kind` (a

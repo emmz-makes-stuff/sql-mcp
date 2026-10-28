@@ -202,7 +202,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
             TimeSpan.FromMilliseconds(6));
         using var session = _builder.Build();
 
-        Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "[dbo].[orders]", Cancel));
+        Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "[dbo].[orders]", null, Cancel));
 
         Assert.Equal(new ObjectName("dbo", "orders"), Assert.Single(_builder.Catalog.Describes));
         var introspection = Single(session, "introspection");
@@ -230,7 +230,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
             TimeSpan.FromMilliseconds(3));
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "sales.open_orders", Cancel);
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "sales.open_orders", null, Cancel);
 
         Assert.False(result.IsError, result.Text);
         Assert.Equal(
@@ -251,7 +251,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
             TimeSpan.FromMilliseconds(3));
         using var session = _builder.Build();
 
-        var json = Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.secret_report", Cancel));
+        var json = Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.secret_report", null, Cancel));
 
         Assert.Equal("""{"unavailable":"encrypted"}""", json["definition"]!.ToJsonString());
         Assert.Equal("""[{"name":"@before","type":"date","direction":"input"}]""", json["parameters"]!.ToJsonString());
@@ -263,7 +263,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
         _builder.User(OneDatabase);
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "app.dbo.orders", Cancel);
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "app.dbo.orders", null, Cancel);
 
         Assert.True(result.IsError);
         Assert.Equal("'app.dbo.orders' names another database or server. Give schema.name in this database, such as dbo.orders.", result.Text);
@@ -279,7 +279,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
         _builder.Catalog.DescribeOutcome = new CatalogFailed<ObjectDetails>(FailureKind.UnresolvedName, message, null, TimeSpan.FromMilliseconds(2));
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.nothing_here", Cancel);
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.nothing_here", null, Cancel);
 
         Assert.True(result.IsError);
         Assert.Equal(message, result.Text);
@@ -295,12 +295,78 @@ public sealed class IntrospectionPipelineTests : IDisposable
         _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "deny": ["introspection"] } ] }""");
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.orders", Cancel);
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.orders", null, Cancel);
 
         Assert.True(result.IsError);
         Assert.Equal($"introspection is denied on {Sales} (source: user config).", result.Text);
         Assert.Empty(_builder.Catalog.Describes);
         Assert.Equal("describe_object", Single(session, "denied")["tool"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_bad_argument_on_a_denied_database_is_audited_as_denied()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "deny": ["introspection"] } ] }""");
+        using var session = _builder.Build();
+        var pipeline = new ToolPipeline(session);
+
+        var name = await pipeline.DescribeObjectAsync(Sales, "a.b.c.d", null, Cancel);
+        var type = await pipeline.ListObjectsAsync(Sales, null, ["bogus"], null, Cancel);
+
+        Assert.Equal($"introspection is denied on {Sales} (source: user config).", name.Text);
+        Assert.Equal($"introspection is denied on {Sales} (source: user config).", type.Text);
+        Assert.Equal(["describe_object", "list_objects"], Events(session).Where(e => e["event"]!.GetValue<string>() == "denied").Select(e => e["tool"]!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task A_bad_argument_with_the_audit_log_unavailable_gets_the_audit_refusal()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+        session.Audit.Dispose();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "a.b.c.d", null, Cancel);
+
+        Assert.Equal(AuditLog.UnavailableMessage, result.Text);
+    }
+
+    [Fact]
+    public async Task A_null_type_is_not_an_object_type()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).ListObjectsAsync(Sales, null, ["table", null], null, Cancel);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith("'null' is not an object type. Use one of: table, view,", result.Text, StringComparison.Ordinal);
+        Assert.Empty(_builder.Catalog.Lists);
+    }
+
+    [Fact]
+    public async Task Describe_with_a_type()
+    {
+        _builder.User(OneDatabase);
+        _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(new ObjectDetails("dbo", "address", ObjectType.TableType), TimeSpan.Zero);
+        using var session = _builder.Build();
+
+        Json(await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.address", " Table_Type ", Cancel));
+
+        Assert.Equal(new ObjectName("dbo", "address") { Type = ObjectType.TableType }, Assert.Single(_builder.Catalog.Describes));
+        Assert.Equal(["dbo.address (table_type)"], Single(session, "introspection")["request"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task Describe_with_an_unknown_type()
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.address", "package", Cancel);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith("'package' is not an object type.", result.Text, StringComparison.Ordinal);
+        Assert.Empty(_builder.Catalog.Describes);
     }
 
     private static JsonObject Json(ToolResult result)

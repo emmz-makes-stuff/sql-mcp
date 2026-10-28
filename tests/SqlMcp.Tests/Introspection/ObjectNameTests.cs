@@ -93,6 +93,33 @@ public sealed class ObjectNameTests
     }
 
     [Fact]
+    public void An_object_and_a_type_with_the_same_name()
+    {
+        var problem = NameResolution.Problem(
+            new ObjectName("dbo", "address"),
+            [new ObjectSummary("dbo", "address", ObjectType.Table, null), new ObjectSummary("dbo", "address", ObjectType.TableType, null)]);
+
+        Assert.Equal(
+            "'dbo.address' is ambiguous: it matches dbo.address (table), dbo.address (table_type), an object and a type with the same name. Give its type too, such as table_type.",
+            problem);
+    }
+
+    [Fact]
+    public void Unknown_object_of_a_type()
+    {
+        var problem = NameResolution.Problem(new ObjectName("dbo", "address") { Type = ObjectType.View }, []);
+
+        Assert.StartsWith("No view named 'dbo.address' was found.", problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_name_with_a_type_shows_it_in_the_request()
+    {
+        Assert.Equal("dbo.address (table_type)", (new ObjectName("dbo", "address") { Type = ObjectType.TableType }).ToRequest());
+        Assert.Equal("dbo.address", new ObjectName("dbo", "address").ToRequest());
+    }
+
+    [Fact]
     public void Unknown_object()
     {
         var problem = NameResolution.Problem(new ObjectName("dbo", "nothing_here"), []);

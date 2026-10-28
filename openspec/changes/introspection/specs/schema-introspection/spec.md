@@ -36,7 +36,11 @@ The system SHALL provide a `list_objects` tool that takes a database identifier 
 - **THEN** 1000 entries are returned, `truncated` is true, the total of 3,000 is given, and the message says to filter
 
 ### Requirement: describe_object tool
-The system SHALL provide a `describe_object` tool that takes a database identifier and an object name, and returns the object's type and the details for that type. The name SHALL be `schema.name`, with or without brackets. An unqualified name SHALL be accepted only when exactly one object has that name.
+The system SHALL provide a `describe_object` tool that takes a database identifier, an object name and an optional object type, and returns the object's type and the details for that type. The name SHALL be `schema.name`, with or without brackets. An unqualified name SHALL be accepted only when exactly one object has that name. Types are named apart from other objects, so a type can share a schema-qualified name with another object. Given a type, only objects of that type SHALL match.
+
+#### Scenario: Object and type with the same name
+- **WHEN** an agent calls `describe_object` with `crm.address`, and both the table `crm.address` and the table type `crm.address` exist
+- **THEN** the call fails with an error naming both and asking for the type, and the same call with the type `table_type` describes the table type
 
 #### Scenario: Ambiguous unqualified name
 - **WHEN** an agent calls `describe_object` with `orders`, and both `dbo.orders` and `archive.orders` exist

@@ -45,8 +45,14 @@ internal enum InventoryClass
     SecurityObject,
 }
 
-/// <summary>One entry in a database's inventory. <see cref="Encrypted"/> is true for a module created <c>WITH ENCRYPTION</c>.</summary>
-internal sealed record InventoryItem(CatalogItem Item, InventoryClass Class, bool Encrypted = false);
+/// <summary>
+/// One entry in a database's inventory. <see cref="Encrypted"/> is true for a module created <c>WITH ENCRYPTION</c>.
+/// <see cref="Parent"/> is a DML trigger's table or view, and null for everything else.
+/// </summary>
+internal sealed record InventoryItem(CatalogItem Item, InventoryClass Class, bool Encrypted = false)
+{
+    public CatalogItem? Parent { get; init; }
+}
 
 /// <summary>Something the script leaves out, and why (design I5). <see cref="Reason"/> is one of the <see cref="Completeness"/> reasons.</summary>
 internal sealed record OmittedItem(CatalogItem Item, string Reason);
@@ -62,6 +68,9 @@ internal static class Completeness
     public const string SecurityObject = "security object";
     public const string NotScripted = "not scripted by the generator";
 
+    /// <summary>A DML trigger whose view is encrypted, and so left out with it (code review, 2026-10-28).</summary>
+    public const string OnEncryptedView = "on an encrypted view";
+
     /// <summary>
     /// The inventory entries missing from <paramref name="scripted"/>, in inventory order. Scripted items that aren't
     /// in the inventory don't matter here: they are counted, not checked.
@@ -69,12 +78,21 @@ internal static class Completeness
     public static IReadOnlyList<OmittedItem> Omitted(IReadOnlyList<InventoryItem> inventory, IReadOnlyCollection<CatalogItem> scripted)
     {
         var done = scripted as IReadOnlySet<CatalogItem> ?? scripted.ToHashSet();
-        return [.. inventory.Where(entry => !done.Contains(entry.Item)).Select(entry => new OmittedItem(entry.Item, Reason(entry)))];
+        var encrypted = inventory.Where(entry => entry.Encrypted).Select(entry => entry.Item).ToHashSet();
+        return [.. inventory.Where(entry => !done.Contains(entry.Item)).Select(entry => new OmittedItem(entry.Item, Reason(entry, encrypted)))];
     }
 
-    private static string Reason(InventoryItem entry) => entry switch
+    /// <summary>
+    /// The inventory narrowed to <paramref name="chosen"/> and their own DML triggers, for a script of chosen objects:
+    /// the omitted list names a chosen object, or a trigger of one, that couldn't be scripted, and nothing else.
+    /// </summary>
+    public static IReadOnlyList<InventoryItem> Narrowed(IReadOnlyList<InventoryItem> inventory, IReadOnlySet<CatalogItem> chosen) =>
+        [.. inventory.Where(entry => chosen.Contains(entry.Item) || (entry.Parent is { } parent && chosen.Contains(parent)))];
+
+    private static string Reason(InventoryItem entry, HashSet<CatalogItem> encrypted) => entry switch
     {
         { Encrypted: true } => Encrypted,
+        { Parent: { } parent } when encrypted.Contains(parent) => OnEncryptedView,
         { Class: InventoryClass.SecurityPrincipal } => SecurityPrincipal,
         { Class: InventoryClass.SecurityObject } => SecurityObject,
         _ => NotScripted,

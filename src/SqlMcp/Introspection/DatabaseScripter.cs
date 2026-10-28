@@ -17,8 +17,8 @@ internal static class DatabaseScripter
 {
     /// <summary>
     /// Scripts <paramref name="names"/>, or the whole database when it is null. For chosen objects the inventory is
-    /// narrowed to them, so the omitted list names a chosen object the generator couldn't script (such as an
-    /// encrypted procedure) and nothing that wasn't asked for.
+    /// narrowed to them and their own DML triggers, so the omitted list names a chosen object, or a trigger of one,
+    /// that the generator couldn't script (such as an encrypted procedure), and nothing that wasn't asked for.
     /// </summary>
     public static async Task<CatalogOutcome<ScriptResult>> ScriptAsync(
         ICatalogReader reader,
@@ -69,8 +69,7 @@ internal static class DatabaseScripter
 
         if (chosen is not null)
         {
-            var wanted = chosen.Select(o => new CatalogItem(o.Schema, o.Name, o.Type.ToWireName())).ToHashSet();
-            inventory = [.. inventory.Where(i => wanted.Contains(i.Item))];
+            inventory = Completeness.Narrowed(inventory, chosen.Select(o => new CatalogItem(o.Schema, o.Name, o.Type.ToWireName())).ToHashSet());
         }
 
         var counts = script.Value

@@ -63,6 +63,21 @@
 - [x] 6.3 Fix the "write tool)'s" doc comment in `ToolCatalog.cs`, and delete `SmoSpikeTests` (the round-trip and generator tests now cover it). Verify that `make build` passes
 - [x] 6.4 Fill the test gaps: an integration test for a catalog read that times out for real (blocked by uncommitted DDL), and `git status` not showing a script in "Project initialised before this change" (already covered by `AuditGitIgnoreTests`; nothing to add). Verify that `make gates` is green
 
+## 7. Review fixes: correctness (code-review, 2026-10-28)
+
+- [x] 7.1 Validate arguments after the shared checks: `RunIntrospectionAsync` takes a validate step that runs after audit-ok, database resolution, the grant check (with its `denied` event) and availability, as design I7 orders them. A null inside `types` is refused with the "not an object type" message, not thrown. Verify with pipeline tests: a bad name or type on a denied database is audited as denied; with the audit log unavailable, the refusal comes first; `types: ["table", null]` gives the error
+- [x] 7.2 Group `describe_object`'s foreign keys by `object_id`, not by name, and order them by it. Verify with an integration test in which keys in two schemas share a name and both reference one table
+- [x] 7.3 Tell a sys.objects object and a type with the same `schema.name` apart: an optional `type` argument on `describe_object`, and a type per entry in `script_database`'s `objects`; the ambiguity message suggests it. Add the spec delta (schema-introspection "describe_object tool"; creation-script "Scripting chosen objects") and update the tool descriptions. Verify with unit tests for the message and an integration test with table `x.address` and table type `x.address`
+- [x] 7.4 In a whole-database script, leave out the DML triggers of encrypted views, which are themselves left out, and name them in the omitted list. Verify with a generator integration test: an encrypted view with an INSTEAD OF trigger, and a script that runs on an empty database
+- [x] 7.5 For chosen objects, keep the chosen tables' and views' own DML triggers in the narrowed inventory, so an encrypted one is named as omitted (closes the §5 accepted gap; update the README note). Verify with a pipeline test and the generator integration test
+- [x] 7.6 Report an encrypted database DDL trigger as `encrypted` in `describe_object` and in the omitted list (closes the §3 accepted gap). First probe the catalog for an encryption signal for database triggers; if there is none, stop and ask. Verify with an integration test seeding an encrypted database trigger, and that `make gates` is green
+
+## 8. Review fixes: performance and cleanup (code-review, 2026-10-28)
+
+- [ ] 8.1 Pull out one SQL Server connection helper, shared by `SqlServerCatalogReader` and `SmoScriptGenerator`: the effective connection string, open, and turning failures into `CatalogFailed` (invalid string, connection, timeout -2, SQL), with one timeout constant. Verify that the existing reader and generator failure tests pass unchanged
+- [ ] 8.2 Find a chosen DML trigger through its parent (the reader resolves `parent_object_id`), not by loading every table's and view's triggers; for a whole database, prefetch triggers instead of one query per parent. Verify that the generator tests and the round trip pass
+- [ ] 8.3 For chosen objects, build the narrowed inventory from what resolution returns (with encryption and the chosen tables' triggers), instead of running the whole-database inventory. Verify with the §7.5 tests and a pipeline test asserting that `InventoryAsync` isn't called for chosen objects, and that `make gates` is green
+
 ## Workflow follow-up
 
 - Whole-change self-review, the change-done devlog note, and an offer of `code-review` before archiving.

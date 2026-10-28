@@ -168,8 +168,9 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
         walked.AddRange(database.UserDefinedAggregates.Cast<UserDefinedAggregate>().Select(a => Of(a, a.Schema, ObjectType.Function.ToWireName())));
         walked.AddRange(database.Triggers.Cast<DatabaseDdlTrigger>().Where(t => !t.IsSystemObject && !t.IsEncrypted).Select(t => Of(t, null, ObjectType.Trigger.ToWireName())));
 
+        // An encrypted view is left out, so its triggers go with it; the completeness check names them.
         var triggers = UserTables(database).SelectMany(t => DmlTriggers(t.Triggers, t.Schema))
-            .Concat(UserViews(database).SelectMany(v => DmlTriggers(v.Triggers, v.Schema)))
+            .Concat(UserViews(database).Where(v => !v.IsEncrypted).SelectMany(v => DmlTriggers(v.Triggers, v.Schema)))
             .ToList();
         return new Plan(first, walked, triggers);
     }

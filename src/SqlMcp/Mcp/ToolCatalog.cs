@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using SqlMcp.Classification;
@@ -40,6 +42,7 @@ internal static class ToolDescriptions
 
     public const string DescribeObject =
         "Describes one object in one database, given its name as schema.name (brackets allowed, such as [dbo].[order lines]); a name without a schema is accepted only when exactly one object has it. Use list_objects to find names. " +
+        "Types are named separately from other objects, so a table and a table type can share a name; then give type too, such as table_type. " +
         "For a table or view: its columns in order with types, nullability, defaults, identity and computed expressions; for a table, also its primary key, unique and check constraints, indexes, triggers, the foreign keys it declares and the ones that reference it, and a temporal table's history table and period columns. " +
         "For a view, procedure, function or trigger: its definition, or why it is unavailable (such as encrypted); for a procedure or function, its parameters in order, and a function's kind and return type. " +
         "For a sequence, synonym, type or table type: its settings, target, base type, or columns and constraints. Parts that don't apply or are empty are left out. " +
@@ -50,7 +53,7 @@ internal static class ToolDescriptions
         "The script holds schema only: no data, and no CREATE DATABASE, so run it in an existing, empty database. Batches are separated by lines holding only GO. " +
         "The script is written to a new file, not returned: read it from the path in the result, which also gives its size and the number of objects scripted by type. " +
         "With no object list, the whole database is scripted, and the result lists every object left out and why: users, roles and permissions are never scripted, nor are encrypted definitions. " +
-        "With a list of names (schema.name, resolved as describe_object resolves them), only those objects are scripted, without the objects they depend on; if any name isn't found, no file is written. " +
+        "With a list of names (schema.name, or {\"name\": …, \"type\": …} when an object and a type share the name, resolved as describe_object resolves them), only those objects are scripted, without the objects they depend on; if any name isn't found, no file is written. " +
         "The database is never changed. " +
         VisibilityGuidance;
 
@@ -149,7 +152,7 @@ internal static class ToolCatalog
             list.Add(Create(tools, nameof(SqlMcpTools.DescribeObject), ToolNames.DescribeObject, ToolDescriptions.DescribeObject));
 
             // Read-only too (2026-10-26 decision): it never changes the database, and only ever writes a new, git-ignored file.
-            list.Add(Create(tools, nameof(SqlMcpTools.ScriptDatabase), ToolNames.ScriptDatabase, ToolDescriptions.ScriptDatabase));
+            list.Add(WithObjectsItemsSchema(Create(tools, nameof(SqlMcpTools.ScriptDatabase), ToolNames.ScriptDatabase, ToolDescriptions.ScriptDatabase)));
         }
 
         return list;
@@ -163,6 +166,34 @@ internal static class ToolCatalog
         StatementCategory.Execute => ToolDescriptions.Write(ToolDescriptions.ExecuteGuidance, tool.Group, databases),
         _ => throw new ArgumentOutOfRangeException(nameof(tool), tool.Category, "No tool runs this category."),
     };
+
+    /// <summary>
+    /// The generated schema gives <c>script_database</c>'s <c>objects</c> items no type at all, since they bind to
+    /// <see cref="JsonElement"/>. This says what they are: a name, or a name with a type (Emmz's call, 2026-10-28).
+    /// </summary>
+    private static McpServerTool WithObjectsItemsSchema(McpServerTool tool)
+    {
+        var schema = JsonNode.Parse(tool.ProtocolTool.InputSchema.GetRawText())!;
+        var objects = schema["properties"]!["objects"]!;
+        objects["items"] = new JsonObject
+        {
+            ["oneOf"] = new JsonArray(
+                new JsonObject { ["type"] = "string" },
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["name"] = new JsonObject { ["type"] = "string" },
+                        ["type"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. Introspection.ObjectTypes.WireNames.Select(n => JsonValue.Create(n))]) },
+                    },
+                    ["required"] = new JsonArray("name"),
+                    ["additionalProperties"] = false,
+                }),
+        };
+        tool.ProtocolTool.InputSchema = JsonSerializer.SerializeToElement(schema);
+        return tool;
+    }
 
     /// <summary>
     /// A write tool is annotated as not read-only, destructive and not idempotent: running a batch twice applies it
@@ -188,6 +219,13 @@ internal sealed class SqlMcpTools(ToolPipeline pipeline)
 {
     private const string DatabaseParameter = "The database identifier from list_databases, such as localhost:1433/app.";
     private const string HandleParameter = "The handle from query, command or execute.";
+
+    private const string TypeParameter =
+        "The object's type: table, view, procedure, function, trigger, sequence, synonym, type or table_type. Optional: needed only when an object and a type share the name, such as a table and a table type.";
+
+    /// <summary>The objects parameter's description. <see cref="ToolCatalog"/> gives its items a string-or-object schema.</summary>
+    internal const string ObjectsParameter =
+        "Only these objects, each as schema.name, such as \"dbo.orders\", or as {\"name\": \"dbo.address\", \"type\": \"table_type\"} when an object and a type share the name. Optional: leave it out to script the whole database.";
 
     public CallToolResult ListDatabases() => ToCallResult(pipeline.ListDatabases());
 
@@ -218,7 +256,7 @@ internal sealed class SqlMcpTools(ToolPipeline pipeline)
     public async Task<CallToolResult> ListObjects(
         [Description(DatabaseParameter)] string database,
         [Description("Only objects in this schema, such as dbo. Optional.")] string? schema = null,
-        [Description("Only objects of these types: table, view, procedure, function, trigger, sequence, synonym, type, table_type. Optional.")] string[]? types = null,
+        [Description("Only objects of these types: table, view, procedure, function, trigger, sequence, synonym, type, table_type. Optional.")] string?[]? types = null,
         [Description("Only objects whose names match this pattern: * matches any characters, ? one character, ignoring case, such as order*. Optional.")] string? pattern = null,
         CancellationToken cancellationToken = default) =>
         ToCallResult(await pipeline.ListObjectsAsync(database, schema, types, pattern, cancellationToken).ConfigureAwait(false));
@@ -226,12 +264,13 @@ internal sealed class SqlMcpTools(ToolPipeline pipeline)
     public async Task<CallToolResult> DescribeObject(
         [Description(DatabaseParameter)] string database,
         [Description("The object's name as schema.name, such as dbo.orders or [sales].[open orders]. A name without a schema works only when exactly one object has it.")] string name,
-        CancellationToken cancellationToken) =>
-        ToCallResult(await pipeline.DescribeObjectAsync(database, name, cancellationToken).ConfigureAwait(false));
+        [Description(TypeParameter)] string? type = null,
+        CancellationToken cancellationToken = default) =>
+        ToCallResult(await pipeline.DescribeObjectAsync(database, name, type, cancellationToken).ConfigureAwait(false));
 
     public async Task<CallToolResult> ScriptDatabase(
         [Description(DatabaseParameter)] string database,
-        [Description("Only these objects, each as schema.name, such as dbo.orders. Optional: leave it out to script the whole database.")] string[]? objects = null,
+        [Description(ObjectsParameter)] JsonElement[]? objects = null,
         CancellationToken cancellationToken = default) =>
         ToCallResult(await pipeline.ScriptDatabaseAsync(database, objects, cancellationToken).ConfigureAwait(false));
 

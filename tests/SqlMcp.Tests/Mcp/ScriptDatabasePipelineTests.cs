@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using SqlMcp.Audit;
 using SqlMcp.Introspection;
@@ -109,13 +110,31 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
             TimeSpan.FromMilliseconds(2));
         using var session = _builder.Build();
 
-        var json = Json(await new ToolPipeline(session).ScriptDatabaseAsync(Sales, ["orders", "[dbo].[pricing]"], Cancel));
+        var json = Json(await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("orders", "[dbo].[pricing]"), Cancel));
 
         Assert.Equal(["orders", "dbo.pricing"], Assert.Single(_builder.Catalog.Resolves).Select(n => n.ToString()));
         Assert.Equal(["orders", "pricing"], Assert.Single(_builder.Scripts.Calls)!.Select(o => o.Name));
         var omitted = Assert.Single(json["omitted"]!.AsArray())!;
         Assert.Equal("""{"schema":"dbo","name":"pricing","type":"procedure","reason":"encrypted"}""", omitted.ToJsonString());
         Assert.Equal(["orders", "dbo.pricing"], Single(session, "introspection")["request"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task Encrypted_trigger_on_a_chosen_table()
+    {
+        var orders = new CatalogItem("dbo", "orders", "table");
+        _builder.User(OneDatabase);
+        _builder.Catalog.InventoryOutcome = Inventory(
+            [new InventoryItem(orders, InventoryClass.Scriptable)],
+            [new InventoryItem(new CatalogItem("dbo", "orders_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = orders }],
+            [new InventoryItem(new CatalogItem("dbo", "users_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = new CatalogItem("dbo", "users", "table") }]);
+        _builder.Catalog.ResolveOutcome = new CatalogSucceeded<IReadOnlyList<ObjectSummary>>([new ObjectSummary("dbo", "orders", ObjectType.Table, null)], TimeSpan.Zero);
+        using var session = _builder.Build();
+
+        var json = Json(await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("dbo.orders"), Cancel));
+
+        var omitted = Assert.Single(json["omitted"]!.AsArray())!;
+        Assert.Equal("""{"schema":"dbo","name":"orders_secret","type":"trigger","reason":"encrypted"}""", omitted.ToJsonString());
     }
 
     [Fact]
@@ -142,7 +161,7 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
             FailureKind.UnresolvedName, "No object is named dbo.nope.", null, TimeSpan.FromMilliseconds(2));
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).ScriptDatabaseAsync(Sales, ["dbo.orders", "dbo.nope"], Cancel);
+        var result = await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("dbo.orders", "dbo.nope"), Cancel);
 
         Assert.True(result.IsError);
         Assert.Equal("No object is named dbo.nope.", result.Text);
@@ -161,7 +180,7 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
         _builder.User(OneDatabase);
         using var session = _builder.Build();
 
-        var result = await new ToolPipeline(session).ScriptDatabaseAsync(Sales, ["dbo.orders", "a.b.c"], Cancel);
+        var result = await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("dbo.orders", "a.b.c"), Cancel);
 
         Assert.True(result.IsError);
         Assert.Empty(_builder.Catalog.Resolves);
@@ -277,6 +296,49 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
         [.. new[] { Path.Combine(session.ProjectDirectory, ".sql-mcp", "scripts"), session.ScriptsFallbackDirectory }
             .Where(Directory.Exists)
             .SelectMany(Directory.GetFiles)];
+
+    [Fact]
+    public async Task An_objects_entry_can_give_a_type()
+    {
+        _builder.User(OneDatabase);
+        _builder.Catalog.ResolveOutcome = new CatalogSucceeded<IReadOnlyList<ObjectSummary>>(
+            [new ObjectSummary("dbo", "address", ObjectType.TableType, null), new ObjectSummary("dbo", "orders", ObjectType.Table, null)],
+            TimeSpan.Zero);
+        using var session = _builder.Build();
+
+        Json(await new ToolPipeline(session).ScriptDatabaseAsync(
+            Sales, Entries("""{"name": "dbo.address", "type": "table_type"}""", """{"name": "dbo.orders", "type": null}""", "\"dbo.users\""), Cancel));
+
+        Assert.Equal(
+            [new ObjectName("dbo", "address") { Type = ObjectType.TableType }, new ObjectName("dbo", "orders"), new ObjectName("dbo", "users")],
+            Assert.Single(_builder.Catalog.Resolves));
+        Assert.Equal(["dbo.address (table_type)", "dbo.orders", "dbo.users"], Single(session, "introspection")["request"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Theory]
+    [InlineData("42", "An objects entry is 42. Each objects entry is a name")]
+    [InlineData("""{"type": "table"}""", "An objects entry has no name. Each objects entry is a name")]
+    [InlineData("""{"name": "dbo.orders", "kind": "table"}""", "An objects entry has 'kind', which isn't name or type. Each objects entry is a name")]
+    [InlineData("""{"name": "dbo.orders", "type": "package"}""", "'package' is not an object type.")]
+    [InlineData("""{"name": "dbo.orders", "type": 3}""", "'3' is not an object type.")]
+    public async Task A_bad_objects_entry_is_refused_before_anything_is_read(string entry, string message)
+    {
+        _builder.User(OneDatabase);
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Entries("\"dbo.users\"", entry), Cancel);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith(message, result.Text, StringComparison.Ordinal);
+        Assert.Empty(_builder.Catalog.Resolves);
+        Assert.Empty(ScriptFilesIn(session));
+    }
+
+    /// <summary>objects entries given as plain names.</summary>
+    private static JsonElement[] Names(params string[] names) => [.. names.Select(n => JsonSerializer.SerializeToElement(n))];
+
+    /// <summary>objects entries as the raw JSON an agent sends.</summary>
+    private static JsonElement[] Entries(params string[] json) => [.. json.Select(j => JsonDocument.Parse(j).RootElement.Clone())];
 
     private static JsonObject Json(ToolResult result)
     {

@@ -12,6 +12,10 @@ public sealed class SqlServerCatalogReaderListTests(SeededDatabases seeded) : IC
     [
         "-.audit_ddl:trigger",
         "archive.orders:table",
+        "archive.returns:table",
+        "crm.address:table",
+        "crm.address:table_type",
+        "crm.returns:table",
         "dbo.archive_orders:procedure",
         "dbo.customers:synonym",
         "dbo.events:table",
@@ -86,7 +90,7 @@ public sealed class SqlServerCatalogReaderListTests(SeededDatabases seeded) : IC
     {
         var list = await List(caseSensitive: false, new ObjectFilter(null, [ObjectType.Type, ObjectType.TableType, ObjectType.Synonym], null));
 
-        Assert.Equal(["dbo.customers:synonym", "dbo.id_list:table_type", "dbo.phone:type"], list.Objects.Select(Key).Order(StringComparer.Ordinal));
+        Assert.Equal(["crm.address:table_type", "dbo.customers:synonym", "dbo.id_list:table_type", "dbo.phone:type"], list.Objects.Select(Key).Order(StringComparer.Ordinal));
     }
 
     [Fact]

@@ -32,7 +32,15 @@ For a whole-database script, every user object in the catalog SHALL be either in
 - **THEN** the script creates no user, and the omitted list names `app_reader` with the reason that security principals are not scripted
 
 ### Requirement: Scripting chosen objects
-With an object list, the script SHALL create only the objects named, with their own constraints, indexes and triggers, and SHALL NOT add the objects they depend on. Names SHALL be resolved as `describe_object` resolves them. If any name can't be resolved, the call SHALL fail without writing a file.
+With an object list, the script SHALL create only the objects named, with their own constraints, indexes and triggers, and SHALL NOT add the objects they depend on. Each entry SHALL be a name, or a name with an object type. Names SHALL be resolved as `describe_object` resolves them, with the type when one is given. If any name can't be resolved, the call SHALL fail without writing a file. An own trigger that can't be scripted SHALL be named in the omitted list.
+
+#### Scenario: Object and type with the same name
+- **WHEN** an agent scripts `{name: crm.address, type: table_type}`, and both the table `crm.address` and the table type `crm.address` exist
+- **THEN** the script creates the table type and not the table
+
+#### Scenario: Encrypted trigger on a chosen table
+- **WHEN** an agent scripts `dbo.orders`, which has a trigger created `WITH ENCRYPTION`
+- **THEN** the script creates the table without that trigger, and the omitted list names the trigger with the reason that its definition is encrypted
 
 #### Scenario: Two tables
 - **WHEN** an agent scripts `dbo.orders` and `dbo.order_lines`
