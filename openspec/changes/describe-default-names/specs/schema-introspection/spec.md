@@ -14,8 +14,8 @@ For a table or view, `describe_object` SHALL return its columns in order, each w
 - **THEN** the result names its history table and its period columns
 
 #### Scenario: Named default
-- **WHEN** an agent describes a table whose `status` column has `CONSTRAINT DF_orders_status DEFAULT ('new')`
-- **THEN** that column gives the default `('new')` and the default name `DF_orders_status`
+- **WHEN** an agent describes `dbo.users`, whose `created_at` column has `CONSTRAINT df_users_created DEFAULT (sysutcdatetime())`
+- **THEN** that column gives the default `(sysutcdatetime())` and the default name `df_users_created`
 
 #### Scenario: Default named by SQL Server
 - **WHEN** an agent describes a table or table type whose column has a default declared without a name

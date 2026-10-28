@@ -154,7 +154,8 @@ public sealed partial class ScriptRoundTripTests(SqlServerFixture server, Seeded
     /// for them (such as <c>PK__TT_id_li__3213E83F837891E8</c>, or <c>DF__TT_address__line__693CA210</c> for a
     /// default). Those names are blanked for table types.</item>
     /// <item>SMO scripts a table's default that SQL Server named without its name, so the rebuilt database generates
-    /// another (such as <c>DF__orders__status__5441852A</c>). Those names are blanked for every other object.</item>
+    /// another (such as <c>DF__orders__status__5441852A</c>). As a <c>default_name</c>, those names are blanked for
+    /// every other object.</item>
     /// <item>SMO rebuilds a DML trigger's <c>CREATE TRIGGER … AS</c> header from the catalog (bracketed and
     /// schema-qualified) and keeps only the body as written. The header, up to its <c>AS</c>, is dropped.</item>
     /// </list>
@@ -169,13 +170,15 @@ public sealed partial class ScriptRoundTripTests(SqlServerFixture server, Seeded
         }
 
         var json = JsonSerializer.Serialize(ObjectDetailsResponse.From(details), ToolResult.Json);
-        return (details.Type == ObjectType.TableType ? SystemNamed() : SystemNamedDefault()).Replace(json, "\"(system named)\"");
+        return details.Type == ObjectType.TableType
+            ? SystemNamed().Replace(json, "\"(system named)\"")
+            : SystemNamedDefault().Replace(json, "\"default_name\":\"(system named)\"");
     }
 
     [GeneratedRegex("\"(PK|UQ|CK|DF)__[^\"]*__[0-9A-F]{8,16}\"")]
     private static partial Regex SystemNamed();
 
-    [GeneratedRegex("\"DF__[^\"]*__[0-9A-F]{8}\"")]
+    [GeneratedRegex("\"default_name\":\"DF__[^\"]*__[0-9A-F]{8}\"")]
     private static partial Regex SystemNamedDefault();
 
     [GeneratedRegex(@"\A\s*CREATE\s+TRIGGER\b.*?\bAS\b", RegexOptions.Singleline)]

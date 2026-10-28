@@ -1,6 +1,7 @@
 -- A database holding every object type the introspection tools cover, plus the awkward cases: an encrypted
 -- procedure, a database user, a database DDL trigger, a temporal table, a partitioned table, defaults SQL Server names
--- itself (dbo.orders.status and the crm.address table type), and the name clashes at the end. Names are written in one consistent case, so the seed also runs on a case-sensitive collation.
+-- itself (dbo.orders.status and the crm.address table type), and the name clashes at the end. Names are written in
+-- one consistent case, so the seed also runs on a case-sensitive collation.
 
 CREATE SCHEMA sales;
 GO

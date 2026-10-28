@@ -609,13 +609,13 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 
         private Task<List<ColumnDetails>> ColumnsAsync() =>
             RowsAsync(ColumnsSql, r => new ColumnDetails(
-                r.GetString(0),
-                TypeName(r, 1),
-                r.GetBoolean(7),
-                r.IsDBNull(8) ? null : r.GetString(8),
-                r.IsDBNull(9) ? null : r.GetString(9),
-                r.GetBoolean(10) ? true : null,
-                r.IsDBNull(11) ? null : r.GetString(11)));
+                Name: r.GetString(0),
+                Type: TypeName(r, 1),
+                Nullable: r.GetBoolean(7),
+                Default: r.IsDBNull(8) ? null : r.GetString(8),
+                DefaultName: r.IsDBNull(9) ? null : r.GetString(9),
+                Identity: r.GetBoolean(10) ? true : null,
+                Computed: r.IsDBNull(11) ? null : r.GetString(11)));
 
         private async Task<List<IndexDetails>> IndexesAsync()
         {
