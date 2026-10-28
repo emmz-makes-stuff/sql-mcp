@@ -60,11 +60,13 @@ Catalog reads are fixed queries that return a typed model, not rows to buffer an
 ### I3. Object types and the model
 The type names agents see are `table`, `view`, `procedure`, `function`, `trigger`, `sequence`, `synonym`, `type` and
 `table_type`. A function also carries its kind (scalar, inline table-valued, table-valued, or CLR), but the kind is not
-a separate type. Database-level DDL triggers have no schema, and are listed with `schema: null`. `ObjectDetails` is
+a separate type. Database-level DDL triggers have no schema, and are listed without a `schema` key. `ObjectDetails` is
 one record with optional parts (columns, keys, indexes, foreign keys, triggers, parameters, definition, sequence,
 synonym target, base type, temporal). Only the parts that apply to the type are filled in, and empty parts are left
-out of the JSON. A definition is either text or `{ "unavailable": "<reason>" }`. The reason is `encrypted`, or `no
-permission` when `sys.sql_modules.definition` is NULL for any other reason.
+out of the JSON. A definition is either text or `{ "unavailable": "<reason>" }`. The reason is `encrypted`; `clr`
+for a CLR routine, which has no T-SQL definition; or `no permission` when `sys.sql_modules.definition` is NULL for any
+other reason. A database trigger isn't in `sys.objects`, so its encryption can't be read, and an encrypted one reports
+`no permission`.
 
 ### I4. Catalog reads
 - One connection per call, opened from the same effective connection string the executor builds. Every command
@@ -75,7 +77,7 @@ permission` when `sys.sql_modules.definition` is NULL for any other reason.
 - The total and the cap come from one query, using `COUNT(*) OVER ()` and `TOP (@cap)`.
 - The glob becomes a `LIKE` pattern. `%`, `_` and `[` are escaped first, then `*` becomes `%` and `?` becomes `_`.
   Both sides are compared through `LOWER()`, so a case-sensitive database collation still matches without regard
-  to case.
+  to case. The type list is matched with `CHARINDEX`, not `STRING_SPLIT`, which needs compatibility level 130.
 - Names are parsed with ScriptDom's `TSqlParser.ParseSchemaObjectName`, which handles brackets and quoted names.
   A name with three or four parts is refused, as the write tools refuse them.
 - An unqualified name is looked up across all schemas: no match means "not found", and more than one means
@@ -85,14 +87,25 @@ permission` when `sys.sql_modules.definition` is NULL for any other reason.
 - `ServerConnection` is built on a `SqlConnection` with the effective connection string, and its
   `StatementTimeout` is the database's timeout. `Server.SetDefaultInitFields` prefetches the properties the
   scripter needs, so it doesn't make a round trip per object.
-- `ScriptingOptions`: `SchemaQualify`, `DriAll`, `Indexes`, `Triggers`, `FullTextIndexes`, `ExtendedProperties`,
-  `ScriptBatchTerminator`, and `AnsiPadding`. `ScriptData`, `Permissions`, `IncludeDatabaseContext` and
-  `IncludeIfNotExists` are off. No `CREATE DATABASE` is emitted.
-- Whole database: list the candidate URNs, leave out encrypted modules first (SMO throws on them), order the rest
-  with `DependencyWalker`, then stream them with `EnumScriptWithList` into the writer.
+- `ScriptingOptions`: `SchemaQualify`, `DriAll`, `Indexes`, `FullTextIndexes`, `ExtendedProperties` and
+  `AnsiPadding`. `ScriptData`, `Permissions`, `IncludeDatabaseContext`, `IncludeIfNotExists`, `ScriptOwner` and
+  `WithDependencies` are off. No `CREATE DATABASE` is emitted.
+  - `Triggers` is off too. One encrypted DML trigger makes SMO fail its whole table, and a trigger URN inside the
+    walk fails to script, so DML triggers are scripted on their own (below).
+  - `ScriptBatchTerminator` isn't used. `EnumScriptWithList` yields one batch per string and never a `GO`, whatever
+    it says, so the generator writes `GO` after each batch.
+- Whole database: list the candidate URNs, leaving out encrypted modules (SMO throws on them). The script is
+  written in three parts, each streamed with `EnumScriptWithList` into the writer:
+  1. schemas and full-text catalogs, since `DiscoverDependencies` refuses schemas and full-text indexes need their
+     catalog;
+  2. everything else that has a create order, ordered by `DependencyWalker`. The walk adds parents that weren't
+     asked for and repeats some nodes, so it is filtered back down to the candidates, first place kept;
+  3. the non-encrypted DML triggers of every table and view, last.
 - Chosen objects: the same walk, filtered down to the chosen set. This keeps the FK order between them (for
-  example `orders` before `order_lines`) without adding any dependency.
-- The generator returns the URNs it scripted. `Completeness` compares them with `ICatalogReader.InventoryAsync`,
+  example `orders` before `order_lines`) without adding any dependency. A chosen table or view brings its own DML
+  triggers, in part 3; a chosen trigger goes there too. Encrypted chosen modules are left out, and the omitted list
+  names them.
+- The generator returns the items it scripted. `Completeness` compares them with `ICatalogReader.InventoryAsync`,
   which covers:
   - `sys.objects`, user types, partition functions and schemes, XML schema collections, user assemblies, and
     full-text catalogs;
@@ -104,13 +117,16 @@ permission` when `sys.sql_modules.definition` is NULL for any other reason.
   `EnumScriptWithList` yields.
 
 ### I6. Script files
-- Directory: `<project>/.sql-mcp/scripts/`. Without a project directory, a `scripts` folder next to the audit
-  log's fallback (`~/.local/state/sql-mcp/scripts`, or `%LOCALAPPDATA%\sql-mcp\scripts`).
+- Directory: `<project>/.sql-mcp/scripts/`, as the audit log chooses its own: only when `.sql-mcp/` exists and the
+  file can be created there. Otherwise, a `scripts` folder next to the audit log's fallback
+  (`~/.local/state/sql-mcp/scripts`, or `%LOCALAPPDATA%\sql-mcp\scripts`).
 - File name: the identifier with every character outside `[A-Za-z0-9._-]` replaced by `_`, then `-`, then the UTC
   time as `yyyyMMddTHHmmssZ`, then `.sql`. For example, `localhost_1433_app-20261026T140509Z.sql`. If the name is
   taken, `-2`, `-3` and so on are added.
-- The script is written to `<name>.sql.tmp`, then moved with `overwrite: false`. On any failure or cancellation
-  the temp file is deleted in a `finally` block.
+- The script is written to `<name>.sql.tmp`, then moved with `overwrite: false`. The name used is the first whose
+  `.sql` and `.sql.tmp` are both free, and the `.sql.tmp` is created with `CreateNew`. If another file takes the name
+  before the move, the next free name is used. On any failure or cancellation the temp file is deleted in a
+  `finally` block.
 - The header comment is written by us, not SMO. It holds the identifier, `SERVERPROPERTY('ProductVersion')`, the
   UTC time and the sql-mcp version, and never the connection string.
 - `.gitignore`: `ProjectLayout` gets `EnsureGitIgnoreLines("logs/", "scripts/")`, which creates the file or adds
@@ -129,8 +145,11 @@ permission` when `sys.sql_modules.definition` is NULL for any other reason.
   7. the response.
 
   There's no classifier step, because no agent SQL runs.
-- `IntrospectionEvent` becomes `(Tool, Database, Request, DurationMs, Succeeded, Error)`. For a script it adds
-  `ScriptPath`, `Counts` and `OmittedCount`. `Request` is the filters, the object name, or the object list.
+- `IntrospectionEvent` becomes `(Tool, Database, Request, DurationMs, Succeeded)`, and a failure adds `Kind` (a
+  `FailureKind`, with the new `UnresolvedName` for a name that matched no object or several) and `ErrorNumber`. As
+  with `FailedEvent`, the message text is never logged, because it can echo values. For a script it adds
+  `ScriptPath`, `Counts` and `OmittedCount`. `Request` is the filters as `name=value` entries, the object name, or
+  the object list.
 - If the audit write fails after a script file has been written, the file is deleted and the agent gets the
   audit-unavailable error. Nothing is handed out unlogged.
 - Responses are snake_case JSON, like the existing ones:

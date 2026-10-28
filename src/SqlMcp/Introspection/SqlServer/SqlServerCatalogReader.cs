@@ -61,14 +61,15 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 
     /// <summary>
     /// The filters compare through <c>LOWER()</c>, so a case-sensitive database collation still matches without regard
-    /// to case. <c>COUNT(*) OVER ()</c> is computed before <c>TOP</c>, so it counts every match.
+    /// to case. <c>COUNT(*) OVER ()</c> is computed before <c>TOP</c>, so it counts every match. The type list is matched
+    /// with <c>CHARINDEX</c>, not <c>STRING_SPLIT</c>, which a database below compatibility level 130 doesn't have.
     /// </summary>
     private const string ListSql = ObjectsCte + """
         SELECT TOP (@cap) schema_name, name, type, approx_rows, COUNT(*) OVER () AS total
         FROM objects
         WHERE (@schema IS NULL OR LOWER(schema_name) = LOWER(@schema))
           AND (@pattern IS NULL OR LOWER(name) LIKE LOWER(@pattern) ESCAPE '\')
-          AND (@types IS NULL OR type IN (SELECT value FROM STRING_SPLIT(@types, ',')))
+          AND (@types IS NULL OR CHARINDEX(',' + type + ',', ',' + @types + ',') > 0)
         ORDER BY schema_name, name;
         """;
 

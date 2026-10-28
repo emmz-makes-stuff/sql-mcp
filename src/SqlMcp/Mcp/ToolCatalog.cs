@@ -54,7 +54,7 @@ internal static class ToolDescriptions
         "The database is never changed. " +
         VisibilityGuidance;
 
-    /// <summary>What every write tool)'s description says about the transaction and the cap (spec: write tool descriptions).</summary>
+    /// <summary>What every write tool's description says about the transaction and the cap (spec: write tool descriptions).</summary>
     private const string WriteGuidance =
         "The batch runs in one transaction and commits all or nothing: if any statement fails, the batch times out, or its statements together affect more rows than the affected-rows cap, everything is rolled back. " +
         "Make each change as narrow as you can. A change over the cap runs in full before it is undone, holding locks while it runs and while it rolls back, so before a change that could touch many rows, count the matching rows with query first. " +

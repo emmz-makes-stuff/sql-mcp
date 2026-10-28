@@ -56,6 +56,13 @@
 - [x] 5.4 Add the round-trip integration test: script the seeded database, create an empty database in the same container, run the script there (split on `GO`), then compare `list_objects` and `describe_object` for every object, leaving out row counts and the omitted objects. Verify that `make itest` passes with "Script rebuilds the schema", "Encrypted procedure", "Database users" and "Failed script leaves no file" (cancelled part way through) covered
 - [x] 5.5 Update the README: replace "Introspection tools come in a later release" with a section on the three tools, the scripts directory, and what is omitted. Note SMO as now used in `docs/dependencies.md`. Verify that the README's sample config test still passes and `make gates` is green
 
+## 6. Review fixes: compatibility, design drift and test gaps
+
+- [x] 6.1 Replace `STRING_SPLIT` in `list_objects`' type filter with a match that works at every compatibility level (`STRING_SPLIT` needs level 130). Verify with an integration test that filters by type on a database at compatibility level 120
+- [x] 6.2 Bring `design.md` in line with what was built: I3's `clr` reason; I5's options (`Triggers` and `ScriptBatchTerminator` off), the three-part script and how chosen objects take their triggers; I7's event fields (`Kind`, `ErrorNumber`). Verify that `make validate` passes
+- [x] 6.3 Fix the "write tool)'s" doc comment in `ToolCatalog.cs`, and delete `SmoSpikeTests` (the round-trip and generator tests now cover it). Verify that `make build` passes
+- [x] 6.4 Fill the test gaps: an integration test for a catalog read that times out for real (blocked by uncommitted DDL), and `git status` not showing a script in "Project initialised before this change" (already covered by `AuditGitIgnoreTests`; nothing to add). Verify that `make gates` is green
+
 ## Workflow follow-up
 
 - Whole-change self-review, the change-done devlog note, and an offer of `code-review` before archiving.
