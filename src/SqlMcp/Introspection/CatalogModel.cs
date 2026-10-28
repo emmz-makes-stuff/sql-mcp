@@ -283,10 +283,11 @@ internal sealed record ObjectDetails(string? Schema, string Name, ObjectType Typ
 }
 
 /// <summary>
-/// One column. <see cref="Default"/> is the default's expression, <see cref="Computed"/> a computed column's
-/// expression; <see cref="Identity"/> is true for an identity column and otherwise null.
+/// One column. <see cref="Default"/> is the default's expression and <see cref="DefaultName"/> its constraint's
+/// name, including one SQL Server generated; <see cref="Computed"/> is a computed column's expression;
+/// <see cref="Identity"/> is true for an identity column and otherwise null.
 /// </summary>
-internal sealed record ColumnDetails(string Name, string Type, bool Nullable, string? Default, bool? Identity, string? Computed);
+internal sealed record ColumnDetails(string Name, string Type, bool Nullable, string? Default, string? DefaultName, bool? Identity, string? Computed);
 
 /// <summary>A primary key or unique constraint. A descending column is written <c>name DESC</c>.</summary>
 internal sealed record KeyDetails(string Name, IReadOnlyList<string> Columns, bool Clustered);

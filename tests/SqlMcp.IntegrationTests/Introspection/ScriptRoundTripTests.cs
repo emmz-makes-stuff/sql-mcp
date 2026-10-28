@@ -147,11 +147,14 @@ public sealed partial class ScriptRoundTripTests(SqlServerFixture server, Seeded
     }
 
     /// <summary>
-    /// The details as <c>describe_object</c> returns them, so nested lists compare by value. Two differences no script
-    /// can avoid are evened out (Emmz's call, 2026-10-27):
+    /// The details as <c>describe_object</c> returns them, so nested lists compare by value. These differences are
+    /// evened out (Emmz's calls, 2026-10-27 and 2026-10-28):
     /// <list type="bullet">
     /// <item>SQL Server doesn't let a table type's constraints be named, so each database generates its own names
-    /// for them (such as <c>PK__TT_id_li__3213E83F837891E8</c>). Those names are blanked for table types.</item>
+    /// for them (such as <c>PK__TT_id_li__3213E83F837891E8</c>, or <c>DF__TT_address__line__693CA210</c> for a
+    /// default). Those names are blanked for table types.</item>
+    /// <item>SMO scripts a table's default that SQL Server named without its name, so the rebuilt database generates
+    /// another (such as <c>DF__orders__status__5441852A</c>). Those names are blanked for every other object.</item>
     /// <item>SMO rebuilds a DML trigger's <c>CREATE TRIGGER … AS</c> header from the catalog (bracketed and
     /// schema-qualified) and keeps only the body as written. The header, up to its <c>AS</c>, is dropped.</item>
     /// </list>
@@ -166,11 +169,14 @@ public sealed partial class ScriptRoundTripTests(SqlServerFixture server, Seeded
         }
 
         var json = JsonSerializer.Serialize(ObjectDetailsResponse.From(details), ToolResult.Json);
-        return details.Type == ObjectType.TableType ? SystemNamed().Replace(json, "\"(system named)\"") : json;
+        return (details.Type == ObjectType.TableType ? SystemNamed() : SystemNamedDefault()).Replace(json, "\"(system named)\"");
     }
 
-    [GeneratedRegex("\"(PK|UQ|CK|DF)__[^\"]*__[0-9A-F]{16}\"")]
+    [GeneratedRegex("\"(PK|UQ|CK|DF)__[^\"]*__[0-9A-F]{8,16}\"")]
     private static partial Regex SystemNamed();
+
+    [GeneratedRegex("\"DF__[^\"]*__[0-9A-F]{8}\"")]
+    private static partial Regex SystemNamedDefault();
 
     [GeneratedRegex(@"\A\s*CREATE\s+TRIGGER\b.*?\bAS\b", RegexOptions.Singleline)]
     private static partial Regex TriggerHeader();

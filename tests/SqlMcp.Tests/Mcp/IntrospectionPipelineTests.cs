@@ -196,7 +196,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
         _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(
             new ObjectDetails("dbo", "orders", ObjectType.Table)
             {
-                Columns = [new ColumnDetails("secret_column", "int", false, null, true, null)],
+                Columns = [new ColumnDetails("secret_column", "int", false, null, null, true, null)],
                 Definition = new Definition.Text("CREATE TABLE secret_definition"),
             },
             TimeSpan.FromMilliseconds(6));
@@ -223,7 +223,7 @@ public sealed class IntrospectionPipelineTests : IDisposable
         _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(
             new ObjectDetails("sales", "open_orders", ObjectType.View)
             {
-                Columns = [new ColumnDetails("id", "int", false, null, null, null), new ColumnDetails("total", "decimal(10,2)", true, null, null, "([a]+[b])")],
+                Columns = [new ColumnDetails("id", "int", false, null, null, null, null), new ColumnDetails("total", "decimal(10,2)", true, null, null, null, "([a]+[b])")],
                 UniqueConstraints = [],
                 Definition = new Definition.Text("CREATE VIEW sales.open_orders AS SELECT 1"),
             },
@@ -235,6 +235,30 @@ public sealed class IntrospectionPipelineTests : IDisposable
         Assert.False(result.IsError, result.Text);
         Assert.Equal(
             """{"schema":"sales","name":"open_orders","type":"view","columns":[{"name":"id","type":"int","nullable":false},{"name":"total","type":"decimal(10,2)","nullable":true,"computed":"([a]+[b])"}],"definition":"CREATE VIEW sales.open_orders AS SELECT 1"}""",
+            result.Text);
+    }
+
+    [Fact]
+    public async Task A_default_gives_its_name_next_to_its_expression()
+    {
+        _builder.User(OneDatabase);
+        _builder.Catalog.DescribeOutcome = new CatalogSucceeded<ObjectDetails>(
+            new ObjectDetails("dbo", "orders", ObjectType.Table)
+            {
+                Columns =
+                [
+                    new ColumnDetails("status", "varchar(10)", false, "('new')", "DF__orders__status__3B75D760", null, null),
+                    new ColumnDetails("placed_at", "date", false, null, null, null, null),
+                ],
+            },
+            TimeSpan.FromMilliseconds(3));
+        using var session = _builder.Build();
+
+        var result = await new ToolPipeline(session).DescribeObjectAsync(Sales, "dbo.orders", null, Cancel);
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Equal(
+            """{"schema":"dbo","name":"orders","type":"table","columns":[{"name":"status","type":"varchar(10)","nullable":false,"default":"('new')","default_name":"DF__orders__status__3B75D760"},{"name":"placed_at","type":"date","nullable":false}]}""",
             result.Text);
     }
 

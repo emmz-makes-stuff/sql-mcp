@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using SqlMcp.Audit;
 using SqlMcp.Introspection;
 using SqlMcp.Introspection.SqlServer;
@@ -104,15 +105,16 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
     public async Task Table_with_keys()
     {
         var orders = await Describe("dbo.orders");
+        var status = await GeneratedDefaultName(TableDefaultNameSql, "dbo", "orders", "status");
 
         Assert.Equal(ObjectType.Table, orders.Type);
         Assert.Equal(
             [
-                new ColumnDetails("id", "int", false, null, true, null),
-                new ColumnDetails("user_id", "int", false, null, null, null),
-                new ColumnDetails("number", "bigint", false, "(NEXT VALUE FOR [dbo].[order_numbers])", null, null),
-                new ColumnDetails("placed_at", "date", false, null, null, null),
-                new ColumnDetails("status", "varchar(10)", false, null, null, null),
+                new ColumnDetails("id", "int", false, null, null, true, null),
+                new ColumnDetails("user_id", "int", false, null, null, null, null),
+                new ColumnDetails("number", "bigint", false, "(NEXT VALUE FOR [dbo].[order_numbers])", "df_orders_number", null, null),
+                new ColumnDetails("placed_at", "date", false, null, null, null, null),
+                new ColumnDetails("status", "varchar(10)", false, "('new')", status, null, null),
             ],
             orders.Columns);
         Assert.Equal(("pk_orders", true), (orders.PrimaryKey!.Name, orders.PrimaryKey.Clustered));
@@ -146,11 +148,11 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
 
         Assert.Equal(
             [
-                new ColumnDetails("id", "int", false, null, true, null),
-                new ColumnDetails("email", "nvarchar(200)", false, null, null, null),
-                new ColumnDetails("phone", "dbo.phone", true, null, null, null),
-                new ColumnDetails("created_at", "datetime2(3)", false, "(sysutcdatetime())", null, null),
-                new ColumnDetails("display_name", "nvarchar(200)", true, null, null, "(lower([email]))"),
+                new ColumnDetails("id", "int", false, null, null, true, null),
+                new ColumnDetails("email", "nvarchar(200)", false, null, null, null, null),
+                new ColumnDetails("phone", "dbo.phone", true, null, null, null, null),
+                new ColumnDetails("created_at", "datetime2(3)", false, "(sysutcdatetime())", "df_users_created", null, null),
+                new ColumnDetails("display_name", "nvarchar(200)", true, null, null, null, "(lower([email]))"),
             ],
             users.Columns);
         var unique = Assert.Single(users.UniqueConstraints!);
@@ -280,7 +282,7 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
     {
         var type = await Describe("dbo.id_list");
 
-        Assert.Equal([new ColumnDetails("id", "int", false, null, null, null)], type.Columns);
+        Assert.Equal([new ColumnDetails("id", "int", false, null, null, null, null)], type.Columns);
         Assert.Equal(["id"], type.PrimaryKey!.Columns);
         Assert.Null(type.ReferencedBy);
     }
@@ -299,7 +301,8 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
         Assert.Equal((ObjectType.Table, "pk_crm_address"), (tableDetails.Type, tableDetails.PrimaryKey!.Name));
         var typeDetails = Assert.IsType<CatalogSucceeded<ObjectDetails>>(type).Value;
         Assert.Equal(ObjectType.TableType, typeDetails.Type);
-        Assert.Equal(["line"], typeDetails.Columns!.Select(c => c.Name));
+        var line = await GeneratedDefaultName(TableTypeDefaultNameSql, "crm", "address", "line");
+        Assert.Equal([new ColumnDetails("line", "nvarchar(100)", false, "(N'')", line, null, null)], typeDetails.Columns);
     }
 
     [Fact]
@@ -338,6 +341,35 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
     {
         var outcome = await _reader.ResolveAsync(connectionString, Names(texts), EffectiveLimits.Default, Cancel);
         return Assert.IsType<CatalogFailed<Resolution>>(outcome);
+    }
+
+    private const string TableDefaultNameSql = """
+        SELECT dc.name
+        FROM sys.columns AS c
+        JOIN sys.default_constraints AS dc ON dc.object_id = c.default_object_id
+        WHERE c.object_id = OBJECT_ID(QUOTENAME(@schema) + '.' + QUOTENAME(@name)) AND c.name = @column;
+        """;
+
+    private const string TableTypeDefaultNameSql = """
+        SELECT dc.name
+        FROM sys.table_types AS tt
+        JOIN sys.columns AS c ON c.object_id = tt.type_table_object_id
+        JOIN sys.default_constraints AS dc ON dc.object_id = c.default_object_id
+        WHERE tt.schema_id = SCHEMA_ID(@schema) AND tt.name = @name AND c.name = @column;
+        """;
+
+    /// <summary>The name SQL Server gave an unnamed default, read straight from the catalog; it differs per database.</summary>
+    private async Task<string> GeneratedDefaultName(string sql, string schema, string name, string column)
+    {
+        await using var connection = new SqlConnection(seeded.ConnectionString);
+        await connection.OpenAsync(Cancel);
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@schema", schema);
+        command.Parameters.AddWithValue("@name", name);
+        command.Parameters.AddWithValue("@column", column);
+        var generated = Assert.IsType<string>(await command.ExecuteScalarAsync(Cancel));
+        Assert.StartsWith("DF__", generated, StringComparison.Ordinal);
+        return generated;
     }
 
     private static List<ObjectName> Names(string[] texts) =>
