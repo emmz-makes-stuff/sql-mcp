@@ -14,7 +14,7 @@ The `sql-mcp` command line lets a person run the server, set up a project, appro
 - **THEN** the server responds over stdout and lists its tools
 
 ### Requirement: init
-`sql-mcp init` SHALL create `.sql-mcp/config.json` (an empty database list, with a `$schema` reference) and `.sql-mcp/.gitignore` (containing `logs/`) in the current directory. It SHALL NOT overwrite an existing config file.
+`sql-mcp init` SHALL create `.sql-mcp/config.json` (an empty database list, with a `$schema` reference) and `.sql-mcp/.gitignore` (containing `logs/` and `scripts/`) in the current directory. It SHALL NOT overwrite an existing config file.
 
 #### Scenario: Fresh project
 - **WHEN** `sql-mcp init` runs in a directory without `.sql-mcp/`

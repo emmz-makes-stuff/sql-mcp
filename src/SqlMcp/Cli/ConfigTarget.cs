@@ -64,7 +64,7 @@ internal sealed class ConfigTarget
         {
             var directory = System.IO.Path.GetDirectoryName(Path)!;
             Directory.CreateDirectory(directory);
-            ProjectLayout.EnsureGitIgnore(directory);
+            ProjectLayout.EnsureGitIgnoreLines(directory);
         }
 
         var file = ConfigFileEditor.Apply(Path, InitCommand.ConfigContent, edit);

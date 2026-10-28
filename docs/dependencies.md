@@ -13,7 +13,7 @@
 
 NuGet packages (restored by `dotnet restore`, no separate install): ModelContextProtocol, Microsoft.Data.SqlClient,
 Microsoft.SqlServer.TransactSql.ScriptDom, System.CommandLine, JsonSchema.Net (config validation), Tomlyn (Codex project registration),
-Microsoft.SqlServer.SqlManagementObjects (change 3),
+Microsoft.SqlServer.SqlManagementObjects (`script_database` script generation, ADR-0003),
 xunit.v3, Testcontainers.MsSql. Versions are pinned in `Directory.Packages.props`.
 
 Release publishing uses nuget.org Trusted Publishing from GitHub Actions (OIDC), so there's no local NuGet login or

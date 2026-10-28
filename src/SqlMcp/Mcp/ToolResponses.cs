@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using SqlMcp.Execution;
+using SqlMcp.Introspection;
 using SqlMcp.Permissions;
 
 namespace SqlMcp.Mcp;
@@ -115,3 +117,99 @@ internal sealed record WriteResponse(bool Committed, IReadOnlyList<int> RowsAffe
 internal sealed record ColumnInfo(string Name, string Type);
 
 internal sealed record AbandonResponse(bool Released);
+
+/// <summary>
+/// What <c>list_objects</c> returns. <see cref="Total"/> counts every match; past the row cap, <see cref="Truncated"/>
+/// is set and <see cref="Message"/> says to filter (spec: object list is capped).
+/// </summary>
+internal sealed record ObjectListResponse(IReadOnlyList<ObjectEntry> Objects, int Total, bool Truncated, string? Message = null)
+{
+    public static ObjectListResponse From(ObjectList list) => new(
+        [.. list.Objects.Select(ObjectEntry.From)],
+        list.Total,
+        list.Truncated,
+        list.Truncated
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"Showing {list.Objects.Count} of {list.Total} matching objects: the list is capped at this database's row cap. Filter by schema, type or name pattern to see the rest.")
+            : null);
+}
+
+/// <summary>One listed object. A database-level trigger has no schema, so <see cref="Schema"/> is left out.</summary>
+internal sealed record ObjectEntry(string? Schema, string Name, string Type, long? ApproxRows)
+{
+    public static ObjectEntry From(ObjectSummary summary) => new(summary.Schema, summary.Name, summary.Type.ToWireName(), summary.ApproxRows);
+}
+
+/// <summary>
+/// What <c>describe_object</c> returns: the object's identity and the parts for its type (design I3). Parts that
+/// don't apply or are empty are null, so they're left out. A definition is its text, or
+/// <c>{ "unavailable": "&lt;reason&gt;" }</c>.
+/// </summary>
+internal sealed record ObjectDetailsResponse(
+    string? Schema,
+    string Name,
+    string Type,
+    string? Kind,
+    IReadOnlyList<ColumnDetails>? Columns,
+    KeyDetails? PrimaryKey,
+    IReadOnlyList<KeyDetails>? UniqueConstraints,
+    IReadOnlyList<CheckDetails>? CheckConstraints,
+    IReadOnlyList<IndexDetails>? Indexes,
+    IReadOnlyList<string>? Triggers,
+    IReadOnlyList<ForeignKeyDetails>? ForeignKeys,
+    IReadOnlyList<ForeignKeyDetails>? ReferencedBy,
+    TemporalDetails? Temporal,
+    IReadOnlyList<ParameterDetails>? Parameters,
+    string? ReturnType,
+    JsonNode? Definition,
+    SequenceDetails? Sequence,
+    string? Target,
+    string? BaseType,
+    bool? Nullable)
+{
+    public static ObjectDetailsResponse From(ObjectDetails details) => new(
+        details.Schema,
+        details.Name,
+        details.Type.ToWireName(),
+        details.Kind,
+        NullIfEmpty(details.Columns),
+        details.PrimaryKey,
+        NullIfEmpty(details.UniqueConstraints),
+        NullIfEmpty(details.CheckConstraints),
+        NullIfEmpty(details.Indexes),
+        NullIfEmpty(details.Triggers),
+        NullIfEmpty(details.ForeignKeys),
+        NullIfEmpty(details.ReferencedBy),
+        details.Temporal,
+        NullIfEmpty(details.Parameters),
+        details.ReturnType,
+        details.Definition switch
+        {
+            Introspection.Definition.Text text => JsonValue.Create(text.Value),
+            Introspection.Definition.Unavailable unavailable => new JsonObject { ["unavailable"] = unavailable.Reason },
+            _ => null,
+        },
+        details.Sequence,
+        details.Target,
+        details.BaseType,
+        details.Nullable);
+
+    private static IReadOnlyList<T>? NullIfEmpty<T>(IReadOnlyList<T>? items) => items is { Count: > 0 } ? items : null;
+}
+
+/// <summary>
+/// What <c>script_database</c> returns (design I7): where the script is, its size, how many objects of each type it
+/// holds, and what it left out with why. Never the script text: the agent reads the file.
+/// </summary>
+internal sealed record ScriptResponse(string Path, long Bytes, IReadOnlyDictionary<string, int> Counts, IReadOnlyList<OmittedEntry> Omitted)
+{
+    public static ScriptResponse From(ScriptResult script) => new(
+        script.Path,
+        script.Bytes,
+        script.Counts,
+        [.. script.Omitted.Select(o => new OmittedEntry(o.Item.Schema, o.Item.Name, o.Item.Type, o.Reason))]);
+}
+
+/// <summary>One object the script left out. Something that isn't schema-scoped, such as a user, has no schema.</summary>
+internal sealed record OmittedEntry(string? Schema, string Name, string Type, string Reason);

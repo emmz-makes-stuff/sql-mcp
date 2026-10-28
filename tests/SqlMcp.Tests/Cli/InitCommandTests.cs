@@ -20,8 +20,9 @@ public sealed class InitCommandTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("", result.Error);
-        Assert.Equal("logs/\n", File.ReadAllText(GitIgnorePath));
+        Assert.Equal("logs/\nscripts/\n", File.ReadAllText(GitIgnorePath));
         Assert.Contains($"Created {ConfigPath}.", result.Output, StringComparison.Ordinal);
+        Assert.Contains($"Created {GitIgnorePath}.", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -48,14 +49,28 @@ public sealed class InitCommandTests : IDisposable
     {
         const string existing = "// mine\n{ \"databases\": [], }\n";
         _cli.Project.Write(".sql-mcp/config.json", existing);
-        _cli.Project.Write(".sql-mcp/.gitignore", "custom\n");
+        _cli.Project.Write(".sql-mcp/.gitignore", "custom\nlogs/\nscripts/\n");
 
         var result = await _cli.RunAsync("init");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(existing, File.ReadAllText(ConfigPath));
-        Assert.Equal("custom\n", File.ReadAllText(GitIgnorePath));
+        Assert.Equal("custom\nlogs/\nscripts/\n", File.ReadAllText(GitIgnorePath));
         Assert.Contains("already exists", result.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(".gitignore", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Initialised_before_scripts_adds_the_scripts_line_and_says_so()
+    {
+        _cli.Project.Write(".sql-mcp/config.json", "{ \"databases\": [] }");
+        _cli.Project.Write(".sql-mcp/.gitignore", "custom\nlogs/\n");
+
+        var result = await _cli.RunAsync("init");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("custom\nlogs/\nscripts/\n", File.ReadAllText(GitIgnorePath));
+        Assert.Contains($"Added scripts/ to {GitIgnorePath}.", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -68,6 +83,6 @@ public sealed class InitCommandTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(existing, File.ReadAllText(ConfigPath));
-        Assert.Equal("logs/\n", File.ReadAllText(GitIgnorePath));
+        Assert.Equal("logs/\nscripts/\n", File.ReadAllText(GitIgnorePath));
     }
 }

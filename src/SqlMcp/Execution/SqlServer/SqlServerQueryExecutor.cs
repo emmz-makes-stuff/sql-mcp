@@ -18,8 +18,8 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
 {
     public const string ApplicationName = "sql-mcp";
 
-    /// <summary>SqlClient reports a command timeout as error number -2.</summary>
-    private const int TimeoutErrorNumber = -2;
+    /// <summary>SqlClient reports a command timeout as error number -2. The catalog reader and generator use it too.</summary>
+    internal const int TimeoutErrorNumber = -2;
 
     private const string NothingCommitted = WriteMessages.NothingCommitted;
 
@@ -34,6 +34,19 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
     /// </summary>
     private static readonly HashSet<int> TransactionEndedErrors = [266, 3902, 3903];
 
+    /// <summary>
+    /// The configured connection string as sql-mcp connects with it, for the executor and the catalog reader alike.
+    /// Throws <see cref="ArgumentException"/> if it can't be parsed.
+    /// </summary>
+    public static string EffectiveConnectionString(string connectionString) => new SqlConnectionStringBuilder(connectionString)
+    {
+        ApplicationName = ApplicationName,
+
+        // Without pooling, closing the connection ends the server session, so nothing outlives the call
+        // (spec: connection released before paging), even if a rollback below fails.
+        Pooling = false,
+    }.ConnectionString;
+
     public async Task<QueryOutcome> ExecuteAsync(string connectionString, string sql, BatchMode mode, EffectiveLimits limits, CancellationToken cancellationToken)
     {
         var write = mode == BatchMode.Write;
@@ -43,14 +56,7 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
         string effectiveConnectionString;
         try
         {
-            effectiveConnectionString = new SqlConnectionStringBuilder(connectionString)
-            {
-                ApplicationName = ApplicationName,
-
-                // Without pooling, closing the connection ends the server session, so nothing outlives the call
-                // (spec: connection released before paging), even if a rollback below fails.
-                Pooling = false,
-            }.ConnectionString;
+            effectiveConnectionString = EffectiveConnectionString(connectionString);
         }
         catch (ArgumentException ex)
         {

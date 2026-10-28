@@ -60,7 +60,7 @@ internal sealed class AuditLog : IDisposable
 
     /// <summary>
     /// Opens the log in <c>&lt;project&gt;/.sql-mcp/logs/</c> if <c>.sql-mcp/</c> exists and can be written to,
-    /// creating <c>.sql-mcp/.gitignore</c> if it is missing. Otherwise it uses <paramref name="fallbackDirectory"/>.
+    /// making sure <c>.sql-mcp/.gitignore</c> lists <c>logs/</c> and <c>scripts/</c>. Otherwise it uses <paramref name="fallbackDirectory"/>.
     /// If neither works, the log is unavailable.
     /// </summary>
     public static AuditLog Open(string projectDirectory, string fallbackDirectory, TimeProvider time, int processId)
@@ -72,7 +72,7 @@ internal sealed class AuditLog : IDisposable
         var sqlMcpDirectory = Path.Combine(projectDirectory, ".sql-mcp");
         if (Directory.Exists(sqlMcpDirectory))
         {
-            var stream = TryOpen(Path.Combine(sqlMcpDirectory, "logs"), name, failures, () => ProjectLayout.EnsureGitIgnore(sqlMcpDirectory));
+            var stream = TryOpen(Path.Combine(sqlMcpDirectory, "logs"), name, failures, () => ProjectLayout.EnsureGitIgnoreLines(sqlMcpDirectory));
             if (stream is not null)
             {
                 return new AuditLog(sessionId, time, processId, stream, null);

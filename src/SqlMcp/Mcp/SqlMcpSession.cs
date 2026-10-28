@@ -2,12 +2,13 @@ using SqlMcp.Audit;
 using SqlMcp.Classification;
 using SqlMcp.Configuration;
 using SqlMcp.Execution;
+using SqlMcp.Introspection;
 using SqlMcp.Permissions;
 
 namespace SqlMcp.Mcp;
 
-/// <summary>The engine-specific parts behind one <see cref="Engine"/> (design D2).</summary>
-internal sealed record EngineServices(IStatementClassifier Classifier, IQueryExecutor Executor);
+/// <summary>The engine-specific parts behind one <see cref="Engine"/> (design D2, introspection I2).</summary>
+internal sealed record EngineServices(IStatementClassifier Classifier, IQueryExecutor Executor, ICatalogReader CatalogReader, IScriptGenerator ScriptGenerator);
 
 /// <summary>
 /// Everything one <c>serve</c> process works from: the effective databases, or the config error that stopped them
@@ -22,7 +23,11 @@ internal sealed class SqlMcpSession(
     string noDatabasesMessage,
     AuditLog audit,
     ResultStore results,
-    IReadOnlyDictionary<Engine, EngineServices> engines) : IDisposable
+    IReadOnlyDictionary<Engine, EngineServices> engines,
+    string projectDirectory,
+    string scriptsFallbackDirectory,
+    TimeProvider time,
+    TextWriter diagnostics) : IDisposable
 {
     public string Version { get; } = version;
 
@@ -45,6 +50,16 @@ internal sealed class SqlMcpSession(
 
     public IReadOnlyDictionary<Engine, EngineServices> Engines { get; } = engines;
 
+    /// <summary>Where <c>script_database</c> writes: this project's <c>.sql-mcp/scripts/</c>, or the fallback (design I6).</summary>
+    public string ProjectDirectory { get; } = projectDirectory;
+
+    public string ScriptsFallbackDirectory { get; } = scriptsFallbackDirectory;
+
+    public TimeProvider Time { get; } = time;
+
+    /// <summary>The server's stderr, for problems a person must see that no tool result can carry.</summary>
+    public TextWriter Diagnostics { get; } = diagnostics;
+
     /// <summary>
     /// Discovers and layers the config files. An invalid file doesn't throw: it becomes <see cref="ConfigError"/>.
     /// The project file's widenings, and each project-only database, count as approved only as <c>approvals.json</c> records them.
@@ -55,7 +70,9 @@ internal sealed class SqlMcpSession(
         AuditLog audit,
         TimeProvider time,
         IReadOnlyDictionary<Engine, EngineServices> engines,
-        string version)
+        string version,
+        string scriptsFallbackDirectory,
+        TextWriter? diagnostics = null)
     {
         var files = new[] { paths.UserConfig, paths.ProjectConfig }.Where(File.Exists).ToList();
         IReadOnlyList<EffectiveDatabase> databases = [];
@@ -72,7 +89,7 @@ internal sealed class SqlMcpSession(
             error = $"sql-mcp can't use its configuration, so no database is available. Ask the user to fix it, then restart the server. {ex.Message}";
         }
 
-        return new SqlMcpSession(version, files, databases, error, noDatabases, audit, new ResultStore(time), engines);
+        return new SqlMcpSession(version, files, databases, error, noDatabases, audit, new ResultStore(time), engines, paths.ProjectDirectory, scriptsFallbackDirectory, time, diagnostics ?? Console.Error);
     }
 
     public void Dispose()

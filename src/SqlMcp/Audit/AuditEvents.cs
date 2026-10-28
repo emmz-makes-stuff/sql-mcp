@@ -46,6 +46,9 @@ internal enum FailureKind
     /// of the batch may have been committed.
     /// </summary>
     OutcomeUnknown,
+
+    /// <summary>An introspection name matched no object, or more than one (design I4).</summary>
+    UnresolvedName,
     Other,
 }
 
@@ -70,5 +73,28 @@ internal sealed record FailedEvent(
     public long? Affected { get; init; }
 }
 
-/// <summary>An introspection call (used by the introspection change). <see cref="Target"/> is an object name.</summary>
-internal sealed record IntrospectionEvent(string Tool, string Database, string? Target) : AuditEvent("introspection");
+/// <summary>
+/// An introspection call that ran (introspection design I7). <see cref="Request"/> is what was asked for: the
+/// filters as <c>name=value</c> entries, or object names. Never the objects, columns or definitions returned.
+/// A failure keeps only its kind and error number, as <see cref="FailedEvent"/> does, because the message text can
+/// echo values. A script adds where it was written, how many objects of each type it holds, and how many it omitted,
+/// never the script text.
+/// </summary>
+internal sealed record IntrospectionEvent(
+    string Tool,
+    string Database,
+    IReadOnlyList<string> Request,
+    long DurationMs,
+    bool Succeeded) : AuditEvent("introspection")
+{
+    public FailureKind? Kind { get; init; }
+
+    public int? ErrorNumber { get; init; }
+
+    public string? ScriptPath { get; init; }
+
+    /// <summary>Scripted objects by type wire name, such as <c>table</c>.</summary>
+    public IReadOnlyDictionary<string, int>? Counts { get; init; }
+
+    public int? OmittedCount { get; init; }
+}

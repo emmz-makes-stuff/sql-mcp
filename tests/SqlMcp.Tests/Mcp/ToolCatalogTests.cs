@@ -54,7 +54,7 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "next_page", "abandon"], Names(session));
+        Assert.Equal(["list_databases", "query", "next_page", "abandon", "list_objects", "describe_object", "script_database"], Names(session));
     }
 
     [Fact]
@@ -69,8 +69,8 @@ public sealed class ToolCatalogTests : IDisposable
     [Fact]
     public void No_database_allows_query()
     {
-        // list_databases is always offered (2026-10-25 decision); the query tools are not.
-        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        // list_databases is always offered (2026-10-25 decision); the query and introspection tools are not.
+        _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
         Assert.Equal(["list_databases"], Names(session));
@@ -156,13 +156,117 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User(AllWrites);
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon"], Names(session));
+        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon", "list_objects", "describe_object", "script_database"], Names(session));
+    }
+
+    [Fact]
+    public void Introspection_alone_offers_its_tools_without_paging()
+    {
+        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        Assert.Equal(["list_databases", "list_objects", "describe_object", "script_database"], Names(session));
+    }
+
+    [Fact]
+    public void Introspection_tools_are_not_offered_when_introspection_is_denied_everywhere()
+    {
+        _builder.User("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" }, { "connectionString": "Server=other;Database=Hr" } ] }""");
+        using var session = _builder.Build();
+
+        Assert.DoesNotContain(ToolNames.ListObjects, Names(session));
+        Assert.DoesNotContain(ToolNames.DescribeObject, Names(session));
+        Assert.DoesNotContain(ToolNames.ScriptDatabase, Names(session));
+    }
+
+    [Fact]
+    public void Introspection_tools_are_offered_when_one_database_allows_introspection()
+    {
+        _builder.User("""{ "defaults": { "deny": ["introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["introspection"] }, { "connectionString": "Server=other;Database=Hr" } ] }""");
+        using var session = _builder.Build();
+
+        Assert.Contains(ToolNames.ListObjects, Names(session));
+        Assert.Contains(ToolNames.DescribeObject, Names(session));
+        Assert.Contains(ToolNames.ScriptDatabase, Names(session));
+    }
+
+    [Fact]
+    public void Agent_reads_the_list_objects_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var listObjects = Tool(session, ToolNames.ListObjects);
+
+        Assert.True(listObjects.Annotations?.ReadOnlyHint);
+        Assert.False(listObjects.Annotations?.DestructiveHint);
+        Assert.False(listObjects.Annotations?.OpenWorldHint);
+        Assert.Contains("a name pattern where * matches any characters and ? one character", listObjects.Description, StringComparison.Ordinal);
+        Assert.Contains("Only objects the database login can see are shown", listObjects.Description, StringComparison.Ordinal);
+        Assert.Contains("filter further", listObjects.Description, StringComparison.Ordinal);
+        Assert.Contains("then describe_object for an object's details", listObjects.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Agent_reads_the_describe_object_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var describeObject = Tool(session, ToolNames.DescribeObject);
+
+        Assert.True(describeObject.Annotations?.ReadOnlyHint);
+        Assert.False(describeObject.Annotations?.DestructiveHint);
+        Assert.False(describeObject.Annotations?.OpenWorldHint);
+        Assert.Contains("Use list_objects to find names", describeObject.Description, StringComparison.Ordinal);
+        Assert.Contains("Only objects the database login can see are shown", describeObject.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Agent_reads_the_script_database_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var scriptDatabase = Tool(session, ToolNames.ScriptDatabase);
+
+        // Read-only by Emmz's 2026-10-26 decision: it never changes the database, and writes only a new, git-ignored file.
+        Assert.True(scriptDatabase.Annotations?.ReadOnlyHint);
+        Assert.False(scriptDatabase.Annotations?.DestructiveHint);
+        Assert.False(scriptDatabase.Annotations?.OpenWorldHint);
+        Assert.Contains("schema only: no data", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("written to a new file, not returned: read it from the path in the result", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("lists every object left out and why", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("separated by lines holding only GO", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("Only objects the database login can see are shown", scriptDatabase.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Script_database_objects_are_names_or_names_with_a_type()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var schema = System.Text.Json.Nodes.JsonNode.Parse(Tool(session, ToolNames.ScriptDatabase).InputSchema.GetRawText())!;
+        var describeSchema = System.Text.Json.Nodes.JsonNode.Parse(Tool(session, ToolNames.DescribeObject).InputSchema.GetRawText())!;
+
+        Assert.Contains("\"array\"", schema["properties"]!["objects"]!["type"]!.ToJsonString(), StringComparison.Ordinal);
+        var items = schema["properties"]!["objects"]!["items"]!.AsObject();
+        Assert.Null(items["oneOf"]);
+        var anyOf = items["anyOf"]!.AsArray();
+        Assert.Equal("string", anyOf[0]!["type"]!.GetValue<string>());
+        Assert.Equal("""["name"]""", anyOf[1]!["required"]!.ToJsonString());
+        Assert.False(anyOf[1]!.AsObject().ContainsKey("additionalProperties"));
+        Assert.Contains("table_type", anyOf[1]!["properties"]!["type"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Equal(["database"], schema["required"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.NotNull(describeSchema["properties"]!["type"]);
+        Assert.Equal(["database", "name"], describeSchema["required"]!.AsArray().Select(n => n!.GetValue<string>()));
     }
 
     [Fact]
     public void Paging_is_offered_with_command_alone()
     {
-        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
+        _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["command"] } ] }""");
         using var session = _builder.Build();
 
         Assert.Equal(["list_databases", "command", "next_page", "abandon"], Names(session));
@@ -171,7 +275,7 @@ public sealed class ToolCatalogTests : IDisposable
     [Fact]
     public void Ddl_alone_returns_no_rows_so_paging_is_not_offered()
     {
-        _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["ddl"] } ] }""");
+        _builder.User("""{ "defaults": { "deny": ["query", "introspection"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales", "allow": ["ddl"] } ] }""");
         using var session = _builder.Build();
 
         Assert.Equal(["list_databases", "ddl"], Names(session));
