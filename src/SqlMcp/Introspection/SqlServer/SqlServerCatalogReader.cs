@@ -3,7 +3,6 @@ using System.Globalization;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SqlMcp.Audit;
-using SqlMcp.Execution.SqlServer;
 using SqlMcp.Permissions;
 
 namespace SqlMcp.Introspection.SqlServer;
@@ -14,9 +13,6 @@ namespace SqlMcp.Introspection.SqlServer;
 /// </summary>
 internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 {
-    /// <summary>SqlClient reports a command timeout as error number -2.</summary>
-    private const int TimeoutErrorNumber = -2;
-
     private const string ListTimeoutAdvice = " Ask for less: filter by schema, type or name.";
 
     /// <summary>
@@ -24,7 +20,8 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// <c>sys.types</c>, and database triggers (no schema) from <c>sys.triggers</c>. The type codes map to the
     /// engine-neutral names; CLR procedures, functions, aggregates and triggers count as their T-SQL kind.
     /// <c>id</c> is what the describe queries look the object up by: the object id, a table type's table object id,
-    /// or an alias type's user type id. <c>code</c> is <c>sys.objects.type</c>, or <c>TT</c>/<c>UT</c> for types.
+    /// or an alias type's user type id. <c>code</c> is <c>sys.objects.type</c>, trimmed (a table is <c>U</c>, not
+    /// <c>U </c>), or <c>TT</c>/<c>UT</c> for types.
     /// <c>parent_id</c> is a DML trigger's table or view, and 0 or NULL for everything else.
     /// </summary>
     private const string ObjectsCte = """
@@ -40,7 +37,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                 CASE WHEN o.type = 'U'
                     THEN (SELECT SUM(p.rows) FROM sys.partitions AS p WHERE p.object_id = o.object_id AND p.index_id IN (0, 1))
                 END AS approx_rows,
-                o.object_id AS id, CAST(o.type AS varchar(2)) AS code, o.parent_object_id AS parent_id
+                o.object_id AS id, CAST(RTRIM(o.type) AS varchar(2)) AS code, o.parent_object_id AS parent_id
             FROM sys.objects AS o
             JOIN sys.schemas AS s ON s.schema_id = o.schema_id
             WHERE o.is_ms_shipped = 0
@@ -76,16 +73,51 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         """;
 
     /// <summary>
-    /// The objects one name could mean. Unlike the list filters, names compare as the database compares them, so on a
-    /// case-sensitive database <c>dbo.Orders</c> and <c>dbo.orders</c> are different objects, as they are to SQL. Types
-    /// are a namespace of their own, so a table and a table type can share a name; <c>@type</c> tells them apart.
+    /// <see cref="ObjectsCte"/>'s objects, with whether each is a module created <c>WITH ENCRYPTION</c>. A database
+    /// trigger isn't in <c>sys.objects</c>, so its encryption is read as <see cref="EncryptedDatabaseTrigger"/> reads it.
     /// </summary>
-    private const string ResolveSql = ObjectsCte + """
-        SELECT schema_name, name, type, id, code
-        FROM objects
-        WHERE name = @name AND (@schema IS NULL OR schema_name = @schema) AND (@type IS NULL OR type = @type)
-        ORDER BY schema_name, type;
+    private const string EntriesCte = ObjectsCte + $"""
+        , entries AS (
+            SELECT schema_name, name, type, id, code, parent_id,
+                CAST(CASE
+                    WHEN schema_name IS NULL THEN CASE WHEN {EncryptedDatabaseTrigger} THEN 1 ELSE 0 END
+                    WHEN code NOT IN ('TT', 'UT') AND OBJECTPROPERTY(id, 'IsEncrypted') = 1 THEN 1
+                    ELSE 0
+                END AS bit) AS encrypted
+            FROM objects
+        )
         """;
+
+    /// <summary>
+    /// The objects one name could mean, each with its encryption and, for a DML trigger, its table or view. Unlike the
+    /// list filters, names compare as the database compares them, so on a case-sensitive database <c>dbo.Orders</c> and
+    /// <c>dbo.orders</c> are different objects, as they are to SQL. Types are a namespace of their own, so a table and a
+    /// table type can share a name; <c>@type</c> tells them apart.
+    /// </summary>
+    private const string ResolveSql = EntriesCte + $"""
+        SELECT e.schema_name, e.name, e.type, e.id, e.code, e.encrypted, p.schema_name, p.name, p.type
+        FROM entries AS e
+        {ParentJoin}
+        WHERE e.name = @name AND (@schema IS NULL OR e.schema_name = @schema) AND (@type IS NULL OR e.type = @type)
+        ORDER BY e.schema_name, e.type;
+        """;
+
+    /// <summary>
+    /// The DML triggers of the tables and views whose object ids are in <c>@ids</c>, a comma-separated list, for the
+    /// inventory of a script of chosen objects. Matched with <c>CHARINDEX</c>, as <see cref="ListSql"/> matches types.
+    /// </summary>
+    private const string ChildTriggersSql = EntriesCte + """
+        SELECT e.schema_name, e.name, e.type, e.encrypted, p.schema_name, p.name, p.type
+        FROM entries AS e
+        JOIN objects AS p ON p.id = e.parent_id AND p.code IN ('U', 'V')
+        WHERE e.code IN ('TR', 'TA') AND CHARINDEX(',' + CAST(e.parent_id AS varchar(11)) + ',', ',' + @ids + ',') > 0;
+        """;
+
+    /// <summary>
+    /// A DML trigger's table or view as <c>p</c>, for an entry <c>e</c>. Only objects have a parent, and a type's id
+    /// can equal an object's, so types never match.
+    /// </summary>
+    private const string ParentJoin = "LEFT JOIN objects AS p ON p.id = e.parent_id AND e.parent_id <> 0 AND p.code NOT IN ('TT', 'UT')";
 
     /// <summary>
     /// Everything a whole-database script accounts for (design I5). <c>class</c> is the <see cref="InventoryClass"/>:
@@ -96,20 +128,12 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// Each principal holding explicit permissions gets a <c>permissions</c> entry, so the omitted list names them: the
     /// defaults every database has (a user's CONNECT, public's grants on system objects and on column key definitions)
     /// don't count.
-    /// A DML trigger carries its table or view, so a script of chosen objects can account for their triggers, and the
-    /// omitted list can say a trigger went with its encrypted view. A database trigger isn't in <c>sys.objects</c>, so
-    /// its encryption is read as <see cref="EncryptedDatabaseTrigger"/> reads it.
+    /// A DML trigger carries its table or view, so the omitted list can say a trigger went with its encrypted view.
     /// </summary>
-    private const string InventorySql = ObjectsCte + $"""
+    private const string InventorySql = EntriesCte + $"""
         , inventory AS (
-            SELECT schema_name, name, type, 0 AS class,
-                CAST(CASE
-                    WHEN schema_name IS NULL THEN CASE WHEN {EncryptedDatabaseTrigger} THEN 1 ELSE 0 END
-                    WHEN code NOT IN ('TT', 'UT') AND OBJECTPROPERTY(id, 'IsEncrypted') = 1 THEN 1
-                    ELSE 0
-                END AS bit) AS encrypted,
-                parent_id
-            FROM objects
+            SELECT schema_name, name, type, 0 AS class, encrypted, parent_id
+            FROM entries
             UNION ALL
             SELECT s.name, o.name, LOWER(o.type_desc) COLLATE DATABASE_DEFAULT, 0, CAST(0 AS bit), NULL
             FROM sys.objects AS o
@@ -149,10 +173,10 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             UNION ALL
             SELECT NULL, name, 'database_scoped_credential', 2, CAST(0 AS bit), NULL FROM sys.database_scoped_credentials
         )
-        SELECT i.schema_name, i.name, i.type, i.class, i.encrypted, p.schema_name, p.name, p.type
-        FROM inventory AS i
-        LEFT JOIN objects AS p ON p.id = i.parent_id AND i.parent_id <> 0 AND p.code NOT IN ('TT', 'UT')
-        ORDER BY i.class, i.type, i.schema_name, i.name;
+        SELECT e.schema_name, e.name, e.type, e.class, e.encrypted, p.schema_name, p.name, p.type
+        FROM inventory AS e
+        {ParentJoin}
+        ORDER BY e.class, e.type, e.schema_name, e.name;
         """;
 
     /// <summary>
@@ -284,6 +308,8 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         WHERE t.user_type_id = @id;
         """;
 
+    private readonly CatalogConnection _connections = new(time, "reading the catalog");
+
     public Task<CatalogOutcome<ObjectList>> ListAsync(string connectionString, ObjectFilter filter, EffectiveLimits limits, CancellationToken cancellationToken) =>
         ReadAsync(connectionString, limits, async connection =>
         {
@@ -309,12 +335,35 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             return new ObjectList(objects, total, total > objects.Count);
         }, cancellationToken, ListTimeoutAdvice);
 
-    public Task<CatalogOutcome<IReadOnlyList<ObjectSummary>>> ResolveAsync(
+    /// <remarks>
+    /// The inventory is in the whole-database inventory's order (type, schema, name), compared ordinally rather than
+    /// by the database's collation, since it comes from more than one query.
+    /// </remarks>
+    public Task<CatalogOutcome<Resolution>> ResolveAsync(
         string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken) =>
-        ReadAsync<IReadOnlyList<ObjectSummary>>(connectionString, limits, async connection =>
+        ReadAsync(connectionString, limits, async connection =>
         {
-            var resolved = await ResolveAllAsync(connection, names, limits, cancellationToken).ConfigureAwait(false);
-            return [.. resolved.Select(r => r.Summary).Distinct()];
+            var resolved = (await ResolveAllAsync(connection, names, limits, cancellationToken).ConfigureAwait(false)).DistinctBy(r => r.Summary).ToList();
+            var inventory = resolved.Select(r => new InventoryItem(r.Summary.ToItem(), InventoryClass.Scriptable, r.Encrypted) { Parent = r.Summary.Parent }).ToList();
+            var parents = resolved.Where(r => r.Code is "U" or "V").Select(r => r.Id.ToString(CultureInfo.InvariantCulture)).ToList();
+            if (parents.Count > 0)
+            {
+                await using var command = Command(connection, ChildTriggersSql, limits);
+                command.Parameters.Add(new SqlParameter("@ids", SqlDbType.VarChar, -1) { Value = string.Join(",", parents) });
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    inventory.Add(new InventoryItem(new CatalogItem(reader.GetString(0), reader.GetString(1), reader.GetString(2)), InventoryClass.Scriptable, reader.GetBoolean(3))
+                    {
+                        Parent = ParentAt(reader, 4),
+                    });
+                }
+            }
+
+            return new Resolution(
+                [.. resolved.Select(r => r.Summary)],
+                [.. inventory.DistinctBy(i => i.Item)
+                    .OrderBy(i => i.Item.Type, StringComparer.Ordinal).ThenBy(i => i.Item.Schema, StringComparer.Ordinal).ThenBy(i => i.Item.Name, StringComparer.Ordinal)]);
         }, cancellationToken);
 
     public Task<CatalogOutcome<ObjectDetails>> DescribeAsync(string connectionString, ObjectName name, EffectiveLimits limits, CancellationToken cancellationToken) =>
@@ -350,7 +399,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                     (InventoryClass)reader.GetInt32(3),
                     reader.GetBoolean(4))
                 {
-                    Parent = reader.IsDBNull(6) ? null : new CatalogItem(reader.IsDBNull(5) ? null : reader.GetString(5), reader.GetString(6), reader.GetString(7)),
+                    Parent = ParentAt(reader, 5),
                 });
             }
 
@@ -364,8 +413,8 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             return (string)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
-    /// <summary>An object a name resolved to, with what the describe queries need to find it.</summary>
-    private sealed record Resolved(ObjectSummary Summary, int Id, string Code);
+    /// <summary>An object a name resolved to, with what the describe queries and the chosen inventory need.</summary>
+    private sealed record Resolved(ObjectSummary Summary, int Id, string Code, bool Encrypted);
 
     /// <summary>
     /// Resolves every name on one connection. If any fails, throws <see cref="UnresolvedNameException"/> with every
@@ -386,8 +435,11 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             {
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    var summary = new ObjectSummary(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetString(1), ParseType(reader.GetString(2)), null);
-                    candidates.Add(new Resolved(summary, reader.GetInt32(3), reader.GetString(4)));
+                    var summary = new ObjectSummary(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetString(1), ParseType(reader.GetString(2)), null)
+                    {
+                        Parent = ParentAt(reader, 6),
+                    };
+                    candidates.Add(new Resolved(summary, reader.GetInt32(3), reader.GetString(4), reader.GetBoolean(5)));
                 }
             }
 
@@ -600,67 +652,27 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
 
     private static List<T>? NullIfEmpty<T>(List<T> items) => items.Count == 0 ? null : items;
 
+    /// <summary>A DML trigger's table or view from <see cref="ParentJoin"/>'s schema, name and type, at <paramref name="at"/>.</summary>
+    private static CatalogItem? ParentAt(SqlDataReader r, int at) =>
+        r.IsDBNull(at + 1) ? null : new CatalogItem(r.IsDBNull(at) ? null : r.GetString(at), r.GetString(at + 1), r.GetString(at + 2));
+
     private static ObjectType ParseType(string wire) =>
         ObjectTypes.TryParse(wire, out var type) ? type : throw new InvalidOperationException($"The catalog query returned an unknown object type '{wire}'.");
 
     /// <summary>A name that resolved to no object or several. The message is for the agent and names every problem.</summary>
     private sealed class UnresolvedNameException(string message) : Exception(message);
 
-    /// <summary>
-    /// Opens a connection, runs <paramref name="read"/>, and turns SqlClient's failures into outcomes, as the
-    /// executor does: an unparseable connection string or a failed open is a connection failure, error -2 a timeout.
-    /// </summary>
-    private async Task<CatalogOutcome<T>> ReadAsync<T>(
+    /// <summary>Runs <paramref name="read"/> on its own connection, with a name that didn't resolve as its own failure.</summary>
+    private Task<CatalogOutcome<T>> ReadAsync<T>(
         string connectionString, EffectiveLimits limits, Func<SqlConnection, Task<T>> read, CancellationToken cancellationToken,
-        string timeoutAdvice = "")
-    {
-        var started = time.GetTimestamp();
-        TimeSpan Elapsed() => time.GetElapsedTime(started);
-
-        string effective;
-        try
-        {
-            effective = SqlServerQueryExecutor.EffectiveConnectionString(connectionString);
-        }
-        catch (ArgumentException ex)
-        {
-            return new CatalogFailed<T>(FailureKind.Connection, $"invalid connection string: {ex.Message}", null, Elapsed());
-        }
-
-        await using var connection = new SqlConnection(effective);
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (SqlException ex)
-        {
-            return new CatalogFailed<T>(FailureKind.Connection, $"could not connect: {ex.Message}", ex.Number, Elapsed());
-        }
-
-        try
-        {
-            var value = await read(connection).ConfigureAwait(false);
-            return new CatalogSucceeded<T>(value, Elapsed());
-        }
-        catch (UnresolvedNameException ex)
-        {
-            return new CatalogFailed<T>(FailureKind.UnresolvedName, ex.Message, null, Elapsed());
-        }
-        catch (SqlException ex) when (ex.Number == TimeoutErrorNumber)
-        {
-            return new CatalogFailed<T>(
-                FailureKind.Timeout,
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"reading the catalog timed out after {limits.TimeoutSeconds} seconds (this database's command timeout), so it was cancelled.{timeoutAdvice}"),
-                ex.Number,
-                Elapsed());
-        }
-        catch (SqlException ex)
-        {
-            return new CatalogFailed<T>(FailureKind.Sql, $"reading the catalog failed: {ex.Message}", ex.Number, Elapsed());
-        }
-    }
+        string timeoutAdvice = "") =>
+        _connections.RunAsync(
+            connectionString,
+            limits,
+            read,
+            cancellationToken,
+            timeoutAdvice,
+            ex => ex is UnresolvedNameException ? (FailureKind.UnresolvedName, ex.Message) : null);
 
     private static SqlCommand Command(SqlConnection connection, string sql, EffectiveLimits limits) =>
         new(sql, connection) { CommandTimeout = limits.TimeoutSeconds };

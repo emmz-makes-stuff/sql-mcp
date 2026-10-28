@@ -251,11 +251,13 @@ public sealed class ToolCatalogTests : IDisposable
         var describeSchema = System.Text.Json.Nodes.JsonNode.Parse(Tool(session, ToolNames.DescribeObject).InputSchema.GetRawText())!;
 
         Assert.Contains("\"array\"", schema["properties"]!["objects"]!["type"]!.ToJsonString(), StringComparison.Ordinal);
-        var oneOf = schema["properties"]!["objects"]!["items"]!["oneOf"]!.AsArray();
-        Assert.Equal("string", oneOf[0]!["type"]!.GetValue<string>());
-        Assert.Equal("""["name"]""", oneOf[1]!["required"]!.ToJsonString());
-        Assert.False(oneOf[1]!["additionalProperties"]!.GetValue<bool>());
-        Assert.Contains("table_type", oneOf[1]!["properties"]!["type"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
+        var items = schema["properties"]!["objects"]!["items"]!.AsObject();
+        Assert.Null(items["oneOf"]);
+        var anyOf = items["anyOf"]!.AsArray();
+        Assert.Equal("string", anyOf[0]!["type"]!.GetValue<string>());
+        Assert.Equal("""["name"]""", anyOf[1]!["required"]!.ToJsonString());
+        Assert.False(anyOf[1]!.AsObject().ContainsKey("additionalProperties"));
+        Assert.Contains("table_type", anyOf[1]!["properties"]!["type"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
         Assert.Equal(["database"], schema["required"]!.AsArray().Select(n => n!.GetValue<string>()));
         Assert.NotNull(describeSchema["properties"]!["type"]);
         Assert.Equal(["database", "name"], describeSchema["required"]!.AsArray().Select(n => n!.GetValue<string>()));

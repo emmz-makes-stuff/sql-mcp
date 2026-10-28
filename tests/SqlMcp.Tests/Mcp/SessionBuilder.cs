@@ -57,8 +57,11 @@ internal sealed class FakeCatalogReader : ICatalogReader
 
     public List<IReadOnlyList<ObjectName>> Resolves { get; } = [];
 
-    /// <summary>The objects names resolve to. By default each name resolves to a table of that name in <c>dbo</c>.</summary>
-    public CatalogOutcome<IReadOnlyList<ObjectSummary>>? ResolveOutcome { get; set; }
+    /// <summary>
+    /// What names resolve to. By default each name resolves to a table of that name in <c>dbo</c>, and the inventory
+    /// holds just those tables.
+    /// </summary>
+    public CatalogOutcome<Resolution>? ResolveOutcome { get; set; }
 
     public int Inventories { get; private set; }
 
@@ -79,11 +82,17 @@ internal sealed class FakeCatalogReader : ICatalogReader
         return Respond(ListOutcome);
     }
 
-    public Task<CatalogOutcome<IReadOnlyList<ObjectSummary>>> ResolveAsync(string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken)
+    public Task<CatalogOutcome<Resolution>> ResolveAsync(string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken)
     {
         Resolves.Add(names);
-        return Respond(ResolveOutcome ?? new CatalogSucceeded<IReadOnlyList<ObjectSummary>>(
-            [.. names.Select(n => new ObjectSummary(n.Schema ?? "dbo", n.Name, ObjectType.Table, null))], TimeSpan.FromMilliseconds(2)));
+        if (ResolveOutcome is not null)
+        {
+            return Respond(ResolveOutcome);
+        }
+
+        List<ObjectSummary> objects = [.. names.Select(n => new ObjectSummary(n.Schema ?? "dbo", n.Name, ObjectType.Table, null))];
+        return Respond<Resolution>(new CatalogSucceeded<Resolution>(
+            new Resolution(objects, [.. objects.Select(o => new InventoryItem(o.ToItem(), InventoryClass.Scriptable))]), TimeSpan.FromMilliseconds(2)));
     }
 
     public Task<CatalogOutcome<ObjectDetails>> DescribeAsync(string connectionString, ObjectName name, EffectiveLimits limits, CancellationToken cancellationToken)

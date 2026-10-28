@@ -82,13 +82,6 @@ internal static class Completeness
         return [.. inventory.Where(entry => !done.Contains(entry.Item)).Select(entry => new OmittedItem(entry.Item, Reason(entry, encrypted)))];
     }
 
-    /// <summary>
-    /// The inventory narrowed to <paramref name="chosen"/> and their own DML triggers, for a script of chosen objects:
-    /// the omitted list names a chosen object, or a trigger of one, that couldn't be scripted, and nothing else.
-    /// </summary>
-    public static IReadOnlyList<InventoryItem> Narrowed(IReadOnlyList<InventoryItem> inventory, IReadOnlySet<CatalogItem> chosen) =>
-        [.. inventory.Where(entry => chosen.Contains(entry.Item) || (entry.Parent is { } parent && chosen.Contains(parent)))];
-
     private static string Reason(InventoryItem entry, HashSet<CatalogItem> encrypted) => entry switch
     {
         { Encrypted: true } => Encrypted,

@@ -18,8 +18,8 @@ internal sealed class SqlServerQueryExecutor(TimeProvider time) : IQueryExecutor
 {
     public const string ApplicationName = "sql-mcp";
 
-    /// <summary>SqlClient reports a command timeout as error number -2.</summary>
-    private const int TimeoutErrorNumber = -2;
+    /// <summary>SqlClient reports a command timeout as error number -2. The catalog reader and generator use it too.</summary>
+    internal const int TimeoutErrorNumber = -2;
 
     private const string NothingCommitted = WriteMessages.NothingCommitted;
 

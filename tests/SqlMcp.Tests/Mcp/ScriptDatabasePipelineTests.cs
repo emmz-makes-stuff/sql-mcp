@@ -98,21 +98,22 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
     }
 
     [Fact]
-    public async Task Chosen_objects_are_resolved_and_the_inventory_narrowed_to_them()
+    public async Task Chosen_objects_are_resolved_and_checked_against_their_own_inventory()
     {
         _builder.User(OneDatabase);
         _builder.Catalog.InventoryOutcome = Inventory(
             [Scriptable("dbo", "orders", "table"), Scriptable("dbo", "customers", "table")],
-            [new InventoryItem(new CatalogItem("dbo", "pricing", "procedure"), InventoryClass.Scriptable, Encrypted: true)],
             [new InventoryItem(new CatalogItem(null, "app_reader", CatalogItemTypes.User), InventoryClass.SecurityPrincipal)]);
-        _builder.Catalog.ResolveOutcome = new CatalogSucceeded<IReadOnlyList<ObjectSummary>>(
+        _builder.Catalog.ResolveOutcome = Resolved(
             [new ObjectSummary("dbo", "orders", ObjectType.Table, null), new ObjectSummary("dbo", "pricing", ObjectType.Procedure, null)],
-            TimeSpan.FromMilliseconds(2));
+            Scriptable("dbo", "orders", "table"),
+            new InventoryItem(new CatalogItem("dbo", "pricing", "procedure"), InventoryClass.Scriptable, Encrypted: true));
         using var session = _builder.Build();
 
         var json = Json(await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("orders", "[dbo].[pricing]"), Cancel));
 
         Assert.Equal(["orders", "dbo.pricing"], Assert.Single(_builder.Catalog.Resolves).Select(n => n.ToString()));
+        Assert.Equal(0, _builder.Catalog.Inventories);
         Assert.Equal(["orders", "pricing"], Assert.Single(_builder.Scripts.Calls)!.Select(o => o.Name));
         var omitted = Assert.Single(json["omitted"]!.AsArray())!;
         Assert.Equal("""{"schema":"dbo","name":"pricing","type":"procedure","reason":"encrypted"}""", omitted.ToJsonString());
@@ -124,15 +125,15 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
     {
         var orders = new CatalogItem("dbo", "orders", "table");
         _builder.User(OneDatabase);
-        _builder.Catalog.InventoryOutcome = Inventory(
-            [new InventoryItem(orders, InventoryClass.Scriptable)],
-            [new InventoryItem(new CatalogItem("dbo", "orders_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = orders }],
-            [new InventoryItem(new CatalogItem("dbo", "users_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = new CatalogItem("dbo", "users", "table") }]);
-        _builder.Catalog.ResolveOutcome = new CatalogSucceeded<IReadOnlyList<ObjectSummary>>([new ObjectSummary("dbo", "orders", ObjectType.Table, null)], TimeSpan.Zero);
+        _builder.Catalog.ResolveOutcome = Resolved(
+            [new ObjectSummary("dbo", "orders", ObjectType.Table, null)],
+            new InventoryItem(orders, InventoryClass.Scriptable),
+            new InventoryItem(new CatalogItem("dbo", "orders_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = orders });
         using var session = _builder.Build();
 
         var json = Json(await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("dbo.orders"), Cancel));
 
+        Assert.Equal(0, _builder.Catalog.Inventories);
         var omitted = Assert.Single(json["omitted"]!.AsArray())!;
         Assert.Equal("""{"schema":"dbo","name":"orders_secret","type":"trigger","reason":"encrypted"}""", omitted.ToJsonString());
     }
@@ -157,7 +158,7 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
     public async Task Unknown_name_in_the_list()
     {
         _builder.User(OneDatabase);
-        _builder.Catalog.ResolveOutcome = new CatalogFailed<IReadOnlyList<ObjectSummary>>(
+        _builder.Catalog.ResolveOutcome = new CatalogFailed<Resolution>(
             FailureKind.UnresolvedName, "No object is named dbo.nope.", null, TimeSpan.FromMilliseconds(2));
         using var session = _builder.Build();
 
@@ -291,6 +292,9 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
     private static CatalogSucceeded<IReadOnlyList<InventoryItem>> Inventory(params IEnumerable<InventoryItem>[] parts) =>
         new([.. parts.SelectMany(p => p)], TimeSpan.FromMilliseconds(4));
 
+    private static CatalogSucceeded<Resolution> Resolved(IReadOnlyList<ObjectSummary> objects, params InventoryItem[] inventory) =>
+        new(new Resolution(objects, inventory), TimeSpan.FromMilliseconds(2));
+
     /// <summary>Every file, finished or temp, in the project's scripts directory and the fallback.</summary>
     private static List<string> ScriptFilesIn(SqlMcpSession session) =>
         [.. new[] { Path.Combine(session.ProjectDirectory, ".sql-mcp", "scripts"), session.ScriptsFallbackDirectory }
@@ -301,9 +305,8 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
     public async Task An_objects_entry_can_give_a_type()
     {
         _builder.User(OneDatabase);
-        _builder.Catalog.ResolveOutcome = new CatalogSucceeded<IReadOnlyList<ObjectSummary>>(
-            [new ObjectSummary("dbo", "address", ObjectType.TableType, null), new ObjectSummary("dbo", "orders", ObjectType.Table, null)],
-            TimeSpan.Zero);
+        _builder.Catalog.ResolveOutcome = Resolved(
+            [new ObjectSummary("dbo", "address", ObjectType.TableType, null), new ObjectSummary("dbo", "orders", ObjectType.Table, null)]);
         using var session = _builder.Build();
 
         Json(await new ToolPipeline(session).ScriptDatabaseAsync(

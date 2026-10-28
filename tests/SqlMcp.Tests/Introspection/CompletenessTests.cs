@@ -89,23 +89,6 @@ public sealed class CompletenessTests
     }
 
     [Fact]
-    public void Narrowed_keeps_the_chosen_objects_and_their_triggers()
-    {
-        var ordersTrigger = new CatalogItem("dbo", "orders_audit", "trigger");
-        var linesTrigger = new CatalogItem("dbo", "order_lines_audit", "trigger");
-        InventoryItem[] inventory =
-        [
-            new(Orders, InventoryClass.Scriptable),
-            new(OrderLines, InventoryClass.Scriptable),
-            new(ordersTrigger, InventoryClass.Scriptable) { Parent = Orders },
-            new(linesTrigger, InventoryClass.Scriptable) { Parent = OrderLines },
-            new(AppReader, InventoryClass.SecurityPrincipal),
-        ];
-
-        Assert.Equal([Orders, ordersTrigger], Completeness.Narrowed(inventory, new HashSet<CatalogItem> { Orders }).Select(i => i.Item));
-    }
-
-    [Fact]
     public void Scripted_items_outside_the_inventory_are_ignored()
     {
         InventoryItem[] inventory = [new(Orders, InventoryClass.Scriptable)];

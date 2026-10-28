@@ -106,11 +106,12 @@ table type can share a `schema.name`.
      left out with it, and omitted as `on an encrypted view`.
 - Chosen objects: the same walk, filtered down to the chosen set. This keeps the FK order between them (for
   example `orders` before `order_lines`) without adding any dependency. A chosen table or view brings its own DML
-  triggers, in part 3; a chosen trigger goes there too. Encrypted chosen modules are left out, and the omitted list
-  names them. The inventory is narrowed to the chosen objects and their own DML triggers (each inventory trigger
-  carries its parent), so an encrypted trigger of a chosen table is named too.
-- The generator returns the items it scripted. `Completeness` compares them with `ICatalogReader.InventoryAsync`,
-  which covers:
+  triggers, in part 3; a chosen trigger goes there too, found through the table or view that resolution names as its
+  parent. Encrypted chosen modules are left out, and the omitted list names them. Their inventory comes from
+  `ICatalogReader.ResolveAsync`, not the whole-database inventory: the chosen objects and their own DML triggers, with
+  encryption and parents, so an encrypted trigger of a chosen table is named too (§8.3).
+- The generator returns the items it scripted. For a whole database, `Completeness` compares them with
+  `ICatalogReader.InventoryAsync`, which covers:
   - `sys.objects`, user types, partition functions and schemes, XML schema collections, user assemblies, and
     full-text catalogs;
   - for the omitted list only: database principals, certificates, keys and database-scoped credentials.

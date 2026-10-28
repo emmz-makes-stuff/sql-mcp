@@ -305,13 +305,13 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
     private async Task<IReadOnlyList<ObjectSummary>> Resolve(string connectionString, params string[] texts)
     {
         var outcome = await _reader.ResolveAsync(connectionString, Names(texts), EffectiveLimits.Default, Cancel);
-        return Assert.IsType<CatalogSucceeded<IReadOnlyList<ObjectSummary>>>(outcome).Value;
+        return Assert.IsType<CatalogSucceeded<Resolution>>(outcome).Value.Objects;
     }
 
-    private async Task<CatalogFailed<IReadOnlyList<ObjectSummary>>> ResolveFails(string connectionString, params string[] texts)
+    private async Task<CatalogFailed<Resolution>> ResolveFails(string connectionString, params string[] texts)
     {
         var outcome = await _reader.ResolveAsync(connectionString, Names(texts), EffectiveLimits.Default, Cancel);
-        return Assert.IsType<CatalogFailed<IReadOnlyList<ObjectSummary>>>(outcome);
+        return Assert.IsType<CatalogFailed<Resolution>>(outcome);
     }
 
     private static List<ObjectName> Names(string[] texts) =>

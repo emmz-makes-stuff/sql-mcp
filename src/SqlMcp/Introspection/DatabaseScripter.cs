@@ -9,16 +9,17 @@ internal sealed record ScriptResult(string Path, long Bytes, IReadOnlyDictionary
 internal sealed record ScriptTarget(string ProjectDirectory, string FallbackDirectory, string Identifier, string SqlMcpVersion, TimeProvider Time);
 
 /// <summary>
-/// <c>script_database</c>'s steps (design I5–I6): resolve the chosen names, take the inventory, read the server
+/// <c>script_database</c>'s steps (design I5–I6): resolve the chosen names or take the inventory, read the server
 /// version, write the script file, then compare what was scripted with the inventory. Every step before the file
 /// can fail the call, so an unknown name never leaves a file behind.
 /// </summary>
 internal static class DatabaseScripter
 {
     /// <summary>
-    /// Scripts <paramref name="names"/>, or the whole database when it is null. For chosen objects the inventory is
-    /// narrowed to them and their own DML triggers, so the omitted list names a chosen object, or a trigger of one,
-    /// that the generator couldn't script (such as an encrypted procedure), and nothing that wasn't asked for.
+    /// Scripts <paramref name="names"/>, or the whole database when it is null. For chosen objects the inventory is the
+    /// one resolution returns, of them and their own DML triggers, so the omitted list names a chosen object, or a
+    /// trigger of one, that the generator couldn't script (such as an encrypted procedure), and nothing that wasn't
+    /// asked for. The whole-database inventory isn't read for them.
     /// </summary>
     public static async Task<CatalogOutcome<ScriptResult>> ScriptAsync(
         ICatalogReader reader,
@@ -32,21 +33,27 @@ internal static class DatabaseScripter
         var started = target.Time.GetTimestamp();
 
         IReadOnlyList<ObjectSummary>? chosen = null;
+        IReadOnlyList<InventoryItem> inventory;
         if (names is not null)
         {
             var resolved = await reader.ResolveAsync(connectionString, names, limits, cancellationToken).ConfigureAwait(false);
-            if (resolved is not CatalogSucceeded<IReadOnlyList<ObjectSummary>> { Value: var objects })
+            if (resolved is not CatalogSucceeded<Resolution> { Value: var resolution })
             {
                 return Failed(resolved, target.Time.GetElapsedTime(started));
             }
 
-            chosen = objects;
+            chosen = resolution.Objects;
+            inventory = resolution.Inventory;
         }
-
-        var inventoryOutcome = await reader.InventoryAsync(connectionString, limits, cancellationToken).ConfigureAwait(false);
-        if (inventoryOutcome is not CatalogSucceeded<IReadOnlyList<InventoryItem>> { Value: var inventory })
+        else
         {
-            return Failed(inventoryOutcome, target.Time.GetElapsedTime(started));
+            var inventoryOutcome = await reader.InventoryAsync(connectionString, limits, cancellationToken).ConfigureAwait(false);
+            if (inventoryOutcome is not CatalogSucceeded<IReadOnlyList<InventoryItem>> { Value: var whole })
+            {
+                return Failed(inventoryOutcome, target.Time.GetElapsedTime(started));
+            }
+
+            inventory = whole;
         }
 
         var versionOutcome = await reader.ServerVersionAsync(connectionString, limits, cancellationToken).ConfigureAwait(false);
@@ -65,11 +72,6 @@ internal static class DatabaseScripter
         if (written is not CatalogSucceeded<WrittenScript<IReadOnlyList<CatalogItem>>> { Value: var script })
         {
             return Failed(written, target.Time.GetElapsedTime(started));
-        }
-
-        if (chosen is not null)
-        {
-            inventory = Completeness.Narrowed(inventory, chosen.Select(o => new CatalogItem(o.Schema, o.Name, o.Type.ToWireName())).ToHashSet());
         }
 
         var counts = script.Value

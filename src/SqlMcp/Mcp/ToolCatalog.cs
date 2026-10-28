@@ -170,6 +170,9 @@ internal static class ToolCatalog
     /// <summary>
     /// The generated schema gives <c>script_database</c>'s <c>objects</c> items no type at all, since they bind to
     /// <see cref="JsonElement"/>. This says what they are: a name, or a name with a type (Emmz's call, 2026-10-28).
+    /// It uses <c>anyOf</c> rather than <c>oneOf</c>, with no <c>additionalProperties</c>, for model APIs that support
+    /// JSON Schema only in part, Gemini especially (Emmz, 2026-10-28). A string and an object never overlap, so the
+    /// meaning is the same, and <c>ParseObjectsEntry</c> still refuses extra keys.
     /// </summary>
     private static McpServerTool WithObjectsItemsSchema(McpServerTool tool)
     {
@@ -177,7 +180,7 @@ internal static class ToolCatalog
         var objects = schema["properties"]!["objects"]!;
         objects["items"] = new JsonObject
         {
-            ["oneOf"] = new JsonArray(
+            ["anyOf"] = new JsonArray(
                 new JsonObject { ["type"] = "string" },
                 new JsonObject
                 {
@@ -188,7 +191,6 @@ internal static class ToolCatalog
                         ["type"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. Introspection.ObjectTypes.WireNames.Select(n => JsonValue.Create(n))]) },
                     },
                     ["required"] = new JsonArray("name"),
-                    ["additionalProperties"] = false,
                 }),
         };
         tool.ProtocolTool.InputSchema = JsonSerializer.SerializeToElement(schema);

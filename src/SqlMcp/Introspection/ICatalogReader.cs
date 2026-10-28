@@ -15,9 +15,11 @@ internal interface ICatalogReader
     /// <summary>
     /// Finds the one object each name means (design I4): a schema-qualified name must match exactly, an unqualified one
     /// must match in exactly one schema. Names compare as the database compares them. If any name fails, the outcome
-    /// is a <see cref="FailureKind.UnresolvedName"/> failure whose message covers every name that failed.
+    /// is a <see cref="FailureKind.UnresolvedName"/> failure whose message covers every name that failed. A name given
+    /// twice, or two names for one object, give it once. The inventory that comes with them spares a script of chosen
+    /// objects the whole-database <see cref="InventoryAsync"/>.
     /// </summary>
-    Task<CatalogOutcome<IReadOnlyList<ObjectSummary>>> ResolveAsync(string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken);
+    Task<CatalogOutcome<Resolution>> ResolveAsync(string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken);
 
     /// <summary>Resolves <paramref name="name"/> as <see cref="ResolveAsync"/> does, then reads its details.</summary>
     Task<CatalogOutcome<ObjectDetails>> DescribeAsync(string connectionString, ObjectName name, EffectiveLimits limits, CancellationToken cancellationToken);

@@ -3,7 +3,6 @@ using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Sdk.Sfc;
 using Microsoft.SqlServer.Management.Smo;
 using SqlMcp.Audit;
-using SqlMcp.Execution.SqlServer;
 using SqlMcp.Permissions;
 
 namespace SqlMcp.Introspection.SqlServer;
@@ -27,8 +26,7 @@ namespace SqlMcp.Introspection.SqlServer;
 /// </remarks>
 internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
 {
-    /// <summary>SqlClient reports a command timeout as error number -2.</summary>
-    private const int TimeoutErrorNumber = -2;
+    private readonly CatalogConnection _connections = new(time, "scripting");
 
     /// <summary>Design I5's options, less <c>Triggers</c> and <c>ScriptBatchTerminator</c> (see the remarks).</summary>
     private static ScriptingOptions Options() => new()
@@ -49,71 +47,31 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
 
     public Task<CatalogOutcome<IReadOnlyList<CatalogItem>>> GenerateAsync(
         string connectionString, IReadOnlyList<ObjectSummary>? objects, TextWriter writer, EffectiveLimits limits, CancellationToken cancellationToken) =>
-        Task.Run(() => Generate(connectionString, objects, writer, limits, cancellationToken), cancellationToken);
+        _connections.RunAsync<IReadOnlyList<CatalogItem>>(
+            connectionString,
+            limits,
+            connection => Task.Run<IReadOnlyList<CatalogItem>>(() => Generate(connection, objects, writer, limits, cancellationToken), cancellationToken),
+            cancellationToken,
+            " Script fewer objects.",
+            ex => ex is SmoException or SfcException ? (FailureKind.Other, $"scripting failed: {Messages(ex)}") : null);
 
-    private CatalogOutcome<IReadOnlyList<CatalogItem>> Generate(
-        string connectionString, IReadOnlyList<ObjectSummary>? objects, TextWriter writer, EffectiveLimits limits, CancellationToken cancellationToken)
+    private static List<CatalogItem> Generate(
+        SqlConnection connection, IReadOnlyList<ObjectSummary>? objects, TextWriter writer, EffectiveLimits limits, CancellationToken cancellationToken)
     {
-        var started = time.GetTimestamp();
-        TimeSpan Elapsed() => time.GetElapsedTime(started);
+        var server = new Server(new ServerConnection(connection) { StatementTimeout = limits.TimeoutSeconds });
+        Prefetch(server);
+        var database = server.Databases[connection.Database];
+        var scripter = new Scripter(server) { Options = Options() };
+        database.PrefetchObjects(typeof(Table), scripter.Options);
+        database.PrefetchObjects(typeof(View), scripter.Options);
 
-        string effective;
-        try
-        {
-            effective = SqlServerQueryExecutor.EffectiveConnectionString(connectionString);
-        }
-        catch (ArgumentException ex)
-        {
-            return new CatalogFailed<IReadOnlyList<CatalogItem>>(FailureKind.Connection, $"invalid connection string: {ex.Message}", null, Elapsed());
-        }
-
-        using var connection = new SqlConnection(effective);
-        try
-        {
-            connection.Open();
-        }
-        catch (SqlException ex)
-        {
-            return new CatalogFailed<IReadOnlyList<CatalogItem>>(FailureKind.Connection, $"could not connect: {ex.Message}", ex.Number, Elapsed());
-        }
-
-        try
-        {
-            var server = new Server(new ServerConnection(connection) { StatementTimeout = limits.TimeoutSeconds });
-            Prefetch(server);
-            var database = server.Databases[connection.Database];
-            var scripter = new Scripter(server) { Options = Options() };
-            database.PrefetchObjects(typeof(Table), scripter.Options);
-            database.PrefetchObjects(typeof(View), scripter.Options);
-
-            var plan = objects is null ? WholeDatabase(database) : Chosen(database, objects);
-            var ordered = Walk(scripter, plan.Walked);
-            var scripted = new List<CatalogItem>();
-            Script(scripter, plan.First, writer, scripted, cancellationToken);
-            Script(scripter, ordered, writer, scripted, cancellationToken);
-            Script(scripter, plan.Triggers, writer, scripted, cancellationToken);
-            return new CatalogSucceeded<IReadOnlyList<CatalogItem>>(scripted, Elapsed());
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex) when (Innermost<SqlException>(ex) is { Number: TimeoutErrorNumber } timeout)
-        {
-            return new CatalogFailed<IReadOnlyList<CatalogItem>>(
-                FailureKind.Timeout,
-                $"scripting timed out after {limits.TimeoutSeconds} seconds (this database's command timeout), so it was cancelled. Script fewer objects.",
-                timeout.Number,
-                Elapsed());
-        }
-        catch (Exception ex) when (Innermost<SqlException>(ex) is { } sql)
-        {
-            return new CatalogFailed<IReadOnlyList<CatalogItem>>(FailureKind.Sql, $"scripting failed: {sql.Message}", sql.Number, Elapsed());
-        }
-        catch (Exception ex) when (ex is SmoException or SfcException)
-        {
-            return new CatalogFailed<IReadOnlyList<CatalogItem>>(FailureKind.Other, $"scripting failed: {Messages(ex)}", null, Elapsed());
-        }
+        var plan = objects is null ? WholeDatabase(database) : Chosen(database, objects);
+        var ordered = Walk(scripter, plan.Walked);
+        var scripted = new List<CatalogItem>();
+        Script(scripter, plan.First, writer, scripted, cancellationToken);
+        Script(scripter, ordered, writer, scripted, cancellationToken);
+        Script(scripter, plan.Triggers, writer, scripted, cancellationToken);
+        return scripted;
     }
 
     /// <summary>
@@ -178,7 +136,8 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
     /// <summary>
     /// The objects named, each with its own triggers, and nothing they depend on (spec: scripting chosen objects).
     /// Encrypted modules are left out, for the completeness check to name. A name the catalog reader resolved but SMO
-    /// can't find (dropped in between, say) is an error rather than a silent gap.
+    /// can't find (dropped in between, say, or a DML trigger without its <see cref="ObjectSummary.Parent"/>) is an
+    /// error rather than a silent gap.
     /// </summary>
     private static Plan Chosen(Database database, IReadOnlyList<ObjectSummary> objects)
     {
@@ -221,8 +180,14 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
                     AddUnlessEncrypted(Find(database.Triggers[o.Name], o), t => t.IsEncrypted);
                     break;
                 case ObjectType.Trigger:
-                    var parents = UserTables(database).Select(t => t.Triggers).Concat(UserViews(database).Select(v => v.Triggers));
-                    var trigger = Find(parents.Select(c => c[o.Name]).FirstOrDefault(t => t is not null && ((ScriptSchemaObjectBase)t.Parent).Schema == o.Schema), o);
+                    // Through the table or view the reader resolved, rather than loading every one's triggers.
+                    var owner = o.Parent switch
+                    {
+                        { Type: var type } parent when type == ObjectType.Table.ToWireName() => database.Tables[parent.Name, parent.Schema]?.Triggers,
+                        { Type: var type } parent when type == ObjectType.View.ToWireName() => database.Views[parent.Name, parent.Schema]?.Triggers,
+                        _ => null,
+                    };
+                    var trigger = Find(owner?[o.Name], o);
                     if (!trigger.IsEncrypted)
                     {
                         triggers.Add(Of(trigger, o.Schema, wire));
@@ -311,21 +276,6 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
         }
 
         scripted.AddRange(candidates.Select(c => c.Item));
-    }
-
-    private static T? Innermost<T>(Exception ex)
-        where T : Exception
-    {
-        T? found = null;
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            if (current is T match)
-            {
-                found = match;
-            }
-        }
-
-        return found;
     }
 
     /// <summary>SMO wraps the cause in "Script failed for Server…"; the agent needs the whole chain.</summary>

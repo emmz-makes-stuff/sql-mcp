@@ -80,8 +80,23 @@ internal static class ObjectTypes
     public static string NotAType(string? name) => $"'{name ?? "null"}' is not an object type. Use one of: {string.Join(", ", WireNames)}.";
 }
 
-/// <summary>One object in a listing. <see cref="Schema"/> is null for a database-level trigger.</summary>
-internal sealed record ObjectSummary(string? Schema, string Name, ObjectType Type, long? ApproxRows);
+/// <summary>
+/// One object in a listing. <see cref="Schema"/> is null for a database-level trigger. <see cref="Parent"/> is a
+/// resolved DML trigger's table or view, so the script generator can find the trigger through it, and null otherwise.
+/// </summary>
+internal sealed record ObjectSummary(string? Schema, string Name, ObjectType Type, long? ApproxRows)
+{
+    public CatalogItem? Parent { get; init; }
+
+    /// <summary>The object as the inventory and the script generator name it.</summary>
+    public CatalogItem ToItem() => new(Schema, Name, Type.ToWireName());
+}
+
+/// <summary>
+/// What names resolved to: the <see cref="Objects"/> to script, and the <see cref="Inventory"/> a script of them accounts
+/// for, which is those objects and the DML triggers of the tables and views among them, with their encryption.
+/// </summary>
+internal sealed record Resolution(IReadOnlyList<ObjectSummary> Objects, IReadOnlyList<InventoryItem> Inventory);
 
 /// <summary>
 /// What <c>list_objects</c> asked for. Each part is optional, and an object must match every part given. An empty

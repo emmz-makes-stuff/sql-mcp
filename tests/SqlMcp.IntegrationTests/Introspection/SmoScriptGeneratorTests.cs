@@ -145,18 +145,68 @@ public sealed class SmoScriptGeneratorTests(SqlServerFixture server, SeededDatab
             GO
             CREATE TRIGGER dbo.accounts_plain ON dbo.accounts AFTER UPDATE AS BEGIN SET NOCOUNT ON; END;
             GO
+            CREATE TABLE dbo.users (id int NOT NULL PRIMARY KEY);
+            GO
+            CREATE TRIGGER dbo.users_audit ON dbo.users WITH ENCRYPTION AFTER INSERT AS BEGIN SET NOCOUNT ON; END;
+            GO
             """);
-        var accounts = new ObjectSummary("dbo", "accounts", ObjectType.Table, null);
+        var resolution = await ResolveAsync(connectionString, new ObjectName("dbo", "accounts"));
 
-        var outcome = await _generator.GenerateAsync(connectionString, [accounts], new StringWriter(), EffectiveLimits.Default, Cancel);
-        var inventory = Assert.IsType<CatalogSucceeded<IReadOnlyList<InventoryItem>>>(
-            await _reader.InventoryAsync(connectionString, EffectiveLimits.Default, Cancel)).Value;
+        var outcome = await _generator.GenerateAsync(connectionString, resolution.Objects, new StringWriter(), EffectiveLimits.Default, Cancel);
 
         var scripted = Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value;
         Assert.Equal([new CatalogItem("dbo", "accounts", "table"), new CatalogItem("dbo", "accounts_plain", "trigger")], scripted);
         Assert.Equal(
             [new OmittedItem(new CatalogItem("dbo", "accounts_audit", "trigger"), Completeness.Encrypted)],
-            Completeness.Omitted(Completeness.Narrowed(inventory, new HashSet<CatalogItem> { new("dbo", "accounts", "table") }), scripted));
+            Completeness.Omitted(resolution.Inventory, scripted));
+    }
+
+    [Fact]
+    public async Task A_chosen_trigger_is_found_through_its_table()
+    {
+        var resolution = await ResolveAsync(seeded.ConnectionString, new ObjectName("dbo", "orders_status"));
+        var (script, scripted) = await GenerateAsync(resolution.Objects);
+
+        Assert.Equal(new CatalogItem("dbo", "orders", "table"), Assert.Single(resolution.Objects).Parent);
+        Assert.Equal([new CatalogItem("dbo", "orders_status", "trigger")], scripted);
+        Assert.Contains("CREATE TRIGGER [dbo].[orders_status]", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE TABLE", script, StringComparison.Ordinal);
+        Assert.Empty(Completeness.Omitted(resolution.Inventory, scripted));
+    }
+
+    [Fact]
+    public async Task A_dml_trigger_without_its_parent_is_an_error()
+    {
+        var outcome = await _generator.GenerateAsync(
+            seeded.ConnectionString, [new ObjectSummary("dbo", "orders_status", ObjectType.Trigger, null)], new StringWriter(), EffectiveLimits.Default, Cancel);
+
+        var failed = Assert.IsType<CatalogFailed<IReadOnlyList<CatalogItem>>>(outcome);
+        Assert.Equal(FailureKind.Other, failed.Kind);
+        Assert.Contains("'dbo.orders_status' (trigger) was not found when scripting began.", failed.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_chosen_encrypted_view_takes_its_triggers_with_it()
+    {
+        var connectionString = await server.CreateDatabaseAsync($"chosen_view_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(connectionString, """
+            CREATE TABLE dbo.accounts (id int NOT NULL PRIMARY KEY);
+            GO
+            CREATE VIEW dbo.secret_accounts WITH ENCRYPTION AS SELECT id FROM dbo.accounts;
+            GO
+            CREATE TRIGGER dbo.secret_accounts_insert ON dbo.secret_accounts INSTEAD OF INSERT AS BEGIN SET NOCOUNT ON; END;
+            GO
+            """);
+        var resolution = await ResolveAsync(connectionString, new ObjectName("dbo", "secret_accounts"));
+
+        var outcome = await _generator.GenerateAsync(connectionString, resolution.Objects, new StringWriter(), EffectiveLimits.Default, Cancel);
+
+        Assert.Equal(
+            [
+                new OmittedItem(new CatalogItem("dbo", "secret_accounts_insert", "trigger"), Completeness.OnEncryptedView),
+                new OmittedItem(new CatalogItem("dbo", "secret_accounts", "view"), Completeness.Encrypted),
+            ],
+            Completeness.Omitted(resolution.Inventory, Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value));
     }
 
     [Fact]
@@ -224,6 +274,9 @@ public sealed class SmoScriptGeneratorTests(SqlServerFixture server, SeededDatab
         var outcome = await _generator.GenerateAsync(seeded.ConnectionString, objects, writer, EffectiveLimits.Default, Cancel);
         return (writer.ToString(), Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value);
     }
+
+    private async Task<Resolution> ResolveAsync(string connectionString, params ObjectName[] names) =>
+        Assert.IsType<CatalogSucceeded<Resolution>>(await _reader.ResolveAsync(connectionString, names, EffectiveLimits.Default, Cancel)).Value;
 
     private static int Index(string script, string text)
     {
