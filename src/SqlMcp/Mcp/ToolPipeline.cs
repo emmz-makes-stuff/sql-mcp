@@ -73,31 +73,31 @@ internal sealed class ToolPipeline(SqlMcpSession session)
         RunAsync(SqlTools.Execute, database, sql, cancellationToken);
 
     public Task<ToolResult> ListObjectsAsync(string database, string? schema, IReadOnlyList<string?>? types, string? pattern, CancellationToken cancellationToken) =>
-        RunIntrospectionAsync(
+        RunIntrospectionAsync<ObjectList>(
             ToolNames.ListObjects,
             database,
             () =>
             {
                 if (!ObjectTypes.TryParseAll(types, out var parsed, out var error))
                 {
-                    return IntrospectionCall<ObjectList>.Refused(error!);
+                    return new IntrospectionCall<ObjectList>.Refused(error!);
                 }
 
                 var filter = new ObjectFilter(Blank(schema), parsed, Blank(pattern));
-                return new(filter.Describe(), (engine, db, token) => engine.CatalogReader.ListAsync(db.Entry.ConnectionString!, filter, db.Limits, token));
+                return new IntrospectionCall<ObjectList>.Ready(filter.Describe(), (engine, db, token) => engine.CatalogReader.ListAsync(db.Entry.ConnectionString!, filter, db.Limits, token));
             },
             list => ToolResult.Ok(ObjectListResponse.From(list)),
             cancellationToken);
 
     /// <summary><paramref name="type"/> is needed only when an object and a type share the name (code review, 2026-10-28).</summary>
     public Task<ToolResult> DescribeObjectAsync(string database, string name, string? type, CancellationToken cancellationToken) =>
-        RunIntrospectionAsync(
+        RunIntrospectionAsync<ObjectDetails>(
             ToolNames.DescribeObject,
             database,
             () => ParseName(name, Blank(type)) switch
             {
-                (null, var error) => IntrospectionCall<ObjectDetails>.Refused(error!),
-                ({ } parsed, _) => new([parsed.ToRequest()], (engine, db, token) => engine.CatalogReader.DescribeAsync(db.Entry.ConnectionString!, parsed, db.Limits, token)),
+                (null, var error) => new IntrospectionCall<ObjectDetails>.Refused(error!),
+                ({ } parsed, _) => new IntrospectionCall<ObjectDetails>.Ready([parsed.ToRequest()], (engine, db, token) => engine.CatalogReader.DescribeAsync(db.Entry.ConnectionString!, parsed, db.Limits, token)),
             },
             details => ToolResult.Ok(ObjectDetailsResponse.From(details)),
             cancellationToken);
@@ -109,7 +109,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
     /// before any file is created.
     /// </summary>
     public Task<ToolResult> ScriptDatabaseAsync(string database, IReadOnlyList<JsonElement>? objects, CancellationToken cancellationToken) =>
-        RunIntrospectionAsync(
+        RunIntrospectionAsync<ScriptResult>(
             ToolNames.ScriptDatabase,
             database,
             () =>
@@ -117,7 +117,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
                 List<ObjectName>? names = null;
                 if (objects is { Count: 0 })
                 {
-                    return IntrospectionCall<ScriptResult>.Refused("objects is empty. Name at least one object, or leave objects out to script the whole database.");
+                    return new IntrospectionCall<ScriptResult>.Refused("objects is empty. Name at least one object, or leave objects out to script the whole database.");
                 }
 
                 if (objects is not null)
@@ -128,14 +128,14 @@ internal sealed class ToolPipeline(SqlMcpSession session)
                         var (parsed, error) = ParseObjectsEntry(entry);
                         if (parsed is null)
                         {
-                            return IntrospectionCall<ScriptResult>.Refused(error!);
+                            return new IntrospectionCall<ScriptResult>.Refused(error!);
                         }
 
                         names.Add(parsed);
                     }
                 }
 
-                return new(
+                return new IntrospectionCall<ScriptResult>.Ready(
                     names?.Select(n => n.ToRequest()).ToList() ?? [],
                     (engine, db, token) => DatabaseScripter.ScriptAsync(
                         engine.CatalogReader,
@@ -203,13 +203,19 @@ internal sealed class ToolPipeline(SqlMcpSession session)
     }
 
     /// <summary>
-    /// What an introspection call does once its arguments are valid: the request as the audit log records it, and the
-    /// read. <see cref="Error"/> is set instead when an argument is invalid.
+    /// An introspection call with its arguments checked: <see cref="Ready"/>, with the request as the audit log records
+    /// it and the read, or <see cref="Refused"/>, with why an argument is invalid. There are no other cases.
     /// </summary>
-    private sealed record IntrospectionCall<T>(
-        IReadOnlyList<string> Request, Func<EngineServices, EffectiveDatabase, CancellationToken, Task<CatalogOutcome<T>>>? Read, string? Error = null)
+    private abstract record IntrospectionCall<T>
     {
-        public static IntrospectionCall<T> Refused(string error) => new([], null, error);
+        private IntrospectionCall()
+        {
+        }
+
+        public sealed record Ready(
+            IReadOnlyList<string> Request, Func<EngineServices, EffectiveDatabase, CancellationToken, Task<CatalogOutcome<T>>> Read) : IntrospectionCall<T>;
+
+        public sealed record Refused(string Error) : IntrospectionCall<T>;
     }
 
     /// <summary>
@@ -270,12 +276,12 @@ internal sealed class ToolPipeline(SqlMcpSession session)
         }
 
         var call = prepare();
-        if (call.Read is not { } read)
+        if (call is IntrospectionCall<T>.Refused refused)
         {
-            return ToolResult.Error(call.Error!);
+            return ToolResult.Error(refused.Error);
         }
 
-        var request = call.Request;
+        var (request, read) = (IntrospectionCall<T>.Ready)call;
 
         var engine = session.Engines[db.Entry.Engine];
         CatalogOutcome<T> outcome;

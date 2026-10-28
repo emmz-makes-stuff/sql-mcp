@@ -52,7 +52,7 @@ internal enum InventoryClass
 /// </summary>
 internal sealed record InventoryItem(CatalogItem Item, InventoryClass Class, bool Encrypted = false)
 {
-    public CatalogItem? Parent { get; init; }
+    public TriggerParent? Parent { get; init; }
 
     public bool ParentEncrypted { get; init; }
 }

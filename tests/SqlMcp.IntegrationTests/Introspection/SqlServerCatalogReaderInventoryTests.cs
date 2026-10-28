@@ -91,7 +91,7 @@ public sealed class SqlServerCatalogReaderInventoryTests(SqlServerFixture server
     {
         var inventory = await InventoryAsync(caseSensitive: false);
 
-        Assert.Equal(new CatalogItem("dbo", "orders", "table"), inventory.Single(i => i.Item.Name == "orders_status").Parent);
+        Assert.Equal(new TriggerParent("dbo", "orders", ObjectType.Table), inventory.Single(i => i.Item.Name == "orders_status").Parent);
         Assert.Null(inventory.Single(i => i.Item.Name == "audit_ddl").Parent);
         Assert.Null(inventory.Single(i => i.Item == new CatalogItem("dbo", "orders", "table")).Parent);
     }

@@ -88,9 +88,9 @@
 
 ## 10. Review fixes: batch resolution and types (code-review of §7–§8, 2026-10-28)
 
-- [ ] 10.1 Resolve every name in one query: pass the names as a delimited list (no OPENJSON, which needs compatibility level 130), return each candidate tagged with its name's position, and keep `NameResolution.Problem` per name. Verify that the resolve, describe and compatibility-level itests pass unchanged, with a new itest resolving many names, among them duplicates and an ambiguous one
-- [ ] 10.2 Hold a DML trigger's parent kind as an `ObjectType`, not a wire-name string, so the generator's table-or-view switch is checked by the compiler. Verify with the generator tests
-- [ ] 10.3 Make `IntrospectionCall<T>` a ready/refused pair, so a call with neither a read nor an error can't be built, and drop `call.Error!`. Verify with the introspection pipeline tests and `make gates`
+- [x] 10.1 Resolve every name in one query: pass the names as a delimited list (no OPENJSON, which needs compatibility level 130), return each candidate tagged with its name's position, and keep `NameResolution.Problem` per name. Verify that the resolve, describe and compatibility-level itests pass unchanged, with a new itest resolving many names, among them duplicates and an ambiguous one
+- [x] 10.2 Hold a DML trigger's parent kind as an `ObjectType`, not a wire-name string, so the generator's table-or-view switch is checked by the compiler. Verify with the generator tests
+- [x] 10.3 Make `IntrospectionCall<T>` a ready/refused pair, so a call with neither a read nor an error can't be built, and drop `call.Error!`. Verify with the introspection pipeline tests and `make gates`
 
 ## Workflow follow-up
 

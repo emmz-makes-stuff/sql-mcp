@@ -89,17 +89,38 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         """;
 
     /// <summary>
-    /// The objects one name could mean, each with its encryption and, for a DML trigger, its table or view. Unlike the
-    /// list filters, names compare as the database compares them, so on a case-sensitive database <c>dbo.Orders</c> and
-    /// <c>dbo.orders</c> are different objects, as they are to SQL. Types are a namespace of their own, so a table and a
-    /// table type can share a name; <c>@type</c> tells them apart.
+    /// The objects each name could mean, tagged with the name's position, each with its encryption and, for a DML
+    /// trigger, its table or view. <c>@names</c> is the names as <see cref="NameList"/> joins them, split by a recursive
+    /// CTE: <c>STRING_SPLIT</c> and <c>OPENJSON</c> need compatibility level 130. The separators are found with a binary
+    /// collation, since some collations ignore control characters. Unlike the list filters, names compare as the
+    /// database compares them, so on a case-sensitive database <c>dbo.Orders</c> and <c>dbo.orders</c> are different
+    /// objects, as they are to SQL. Types are a namespace of their own, so a table and a table type can share a name;
+    /// a name's type tells them apart.
     /// </summary>
     private const string ResolveSql = EntriesCte + $"""
-        SELECT e.schema_name, e.name, e.type, e.id, e.code, e.encrypted, p.schema_name, p.name, p.type, p.encrypted
-        FROM entries AS e
+        , split AS (
+            SELECT 0 AS position, CAST(@names AS nvarchar(max)) AS rest, CAST(N'' AS nvarchar(max)) AS item
+            UNION ALL
+            SELECT position + 1, STUFF(rest, 1, c.at, N''), LEFT(rest, c.at - 1)
+            FROM split
+            CROSS APPLY (SELECT CHARINDEX(NCHAR(30) COLLATE Latin1_General_BIN2, rest COLLATE Latin1_General_BIN2) AS at) AS c
+            WHERE c.at > 0
+        ), requested AS (
+            SELECT position,
+                CAST(NULLIF(LEFT(item, f.first - 1), N'') AS sysname) AS schema_name,
+                CAST(SUBSTRING(item, f.first + 1, g.second - f.first - 1) AS sysname) AS name,
+                CAST(NULLIF(SUBSTRING(item, g.second + 1, 128), N'') AS sysname) AS type
+            FROM split
+            CROSS APPLY (SELECT CHARINDEX(NCHAR(31) COLLATE Latin1_General_BIN2, item COLLATE Latin1_General_BIN2) AS first) AS f
+            CROSS APPLY (SELECT CHARINDEX(NCHAR(31) COLLATE Latin1_General_BIN2, item COLLATE Latin1_General_BIN2, f.first + 1) AS second) AS g
+            WHERE position > 0
+        )
+        SELECT r.position, e.schema_name, e.name, e.type, e.id, e.code, e.encrypted, p.schema_name, p.name, p.type, p.encrypted
+        FROM requested AS r
+        JOIN entries AS e ON e.name = r.name AND (r.schema_name IS NULL OR e.schema_name = r.schema_name) AND (r.type IS NULL OR e.type = r.type)
         {ParentJoin}
-        WHERE e.name = @name AND (@schema IS NULL OR e.schema_name = @schema) AND (@type IS NULL OR e.type = @type)
-        ORDER BY e.schema_name, e.type;
+        ORDER BY r.position, e.schema_name, e.type
+        OPTION (MAXRECURSION 0);
         """;
 
     /// <summary>
@@ -423,44 +444,51 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     private sealed record Resolved(ObjectSummary Summary, int Id, string Code, bool Encrypted, bool ParentEncrypted);
 
     /// <summary>
-    /// Resolves every name on one connection. If any fails, throws <see cref="UnresolvedNameException"/> with every
+    /// Resolves every name in one query. If any fails, throws <see cref="UnresolvedNameException"/> with every
     /// problem, one per line, which <see cref="ReadAsync{T}"/> turns into an outcome.
     /// </summary>
     private static async Task<List<Resolved>> ResolveAllAsync(SqlConnection connection, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken)
     {
-        var resolved = new List<Resolved>();
-        var problems = new List<string>();
-        foreach (var name in names)
+        var candidates = names.Select(_ => new List<Resolved>()).ToList();
+        if (names.Count > 0)
         {
             await using var command = Command(connection, ResolveSql, limits);
-            command.Parameters.Add(Text("@schema", name.Schema));
-            command.Parameters.Add(Text("@name", name.Name));
-            command.Parameters.Add(Text("@type", name.Type?.ToWireName()));
-            var candidates = new List<Resolved>();
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            command.Parameters.Add(new SqlParameter("@names", SqlDbType.NVarChar, -1) { Value = NameList(names) });
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                var summary = new ObjectSummary(reader.IsDBNull(1) ? null : reader.GetString(1), reader.GetString(2), ParseType(reader.GetString(3)), null)
                 {
-                    var summary = new ObjectSummary(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetString(1), ParseType(reader.GetString(2)), null)
-                    {
-                        Parent = ParentAt(reader, 6),
-                    };
-                    candidates.Add(new Resolved(summary, reader.GetInt32(3), reader.GetString(4), reader.GetBoolean(5), ParentEncryptedAt(reader, 6)));
-                }
+                    Parent = ParentAt(reader, 7),
+                };
+                candidates[reader.GetInt32(0) - 1].Add(new Resolved(summary, reader.GetInt32(4), reader.GetString(5), reader.GetBoolean(6), ParentEncryptedAt(reader, 7)));
             }
+        }
 
-            if (NameResolution.Problem(name, [.. candidates.Select(c => c.Summary)]) is { } problem)
+        var resolved = new List<Resolved>();
+        var problems = new List<string>();
+        foreach (var (name, found) in names.Zip(candidates))
+        {
+            if (NameResolution.Problem(name, [.. found.Select(c => c.Summary)]) is { } problem)
             {
                 problems.Add(problem);
             }
             else
             {
-                resolved.Add(candidates[0]);
+                resolved.Add(found[0]);
             }
         }
 
         return problems.Count == 0 ? resolved : throw new UnresolvedNameException(string.Join(Environment.NewLine, problems));
     }
+
+    /// <summary>
+    /// <paramref name="names"/> as <see cref="ResolveSql"/> splits them: each name's schema, name and type (empty when
+    /// not given), separated by U+001F, and each name ended by U+001E. <see cref="ObjectName.TryParse"/> refuses names
+    /// holding either.
+    /// </summary>
+    private static string NameList(IReadOnlyList<ObjectName> names) =>
+        string.Concat(names.Select(n => $"{n.Schema}{ObjectName.FieldSeparator}{n.Name}{ObjectName.FieldSeparator}{n.Type?.ToWireName()}{ObjectName.RecordSeparator}"));
 
     /// <summary>The describe queries for one object, on one open connection.</summary>
     private sealed class Describer(SqlConnection connection, int id, EffectiveLimits limits, CancellationToken cancellationToken)
@@ -659,8 +687,8 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     private static List<T>? NullIfEmpty<T>(List<T> items) => items.Count == 0 ? null : items;
 
     /// <summary>A DML trigger's table or view from <see cref="ParentJoin"/>'s schema, name and type, at <paramref name="at"/>.</summary>
-    private static CatalogItem? ParentAt(SqlDataReader r, int at) =>
-        r.IsDBNull(at + 1) ? null : new CatalogItem(r.IsDBNull(at) ? null : r.GetString(at), r.GetString(at + 1), r.GetString(at + 2));
+    private static TriggerParent? ParentAt(SqlDataReader r, int at) =>
+        r.IsDBNull(at + 1) ? null : new TriggerParent(r.GetString(at), r.GetString(at + 1), ParseType(r.GetString(at + 2)));
 
     /// <summary>Whether that table or view is encrypted, from the column after its type; false when there is none.</summary>
     private static bool ParentEncryptedAt(SqlDataReader r, int at) => !r.IsDBNull(at + 3) && r.GetBoolean(at + 3);

@@ -86,11 +86,14 @@ internal static class ObjectTypes
 /// </summary>
 internal sealed record ObjectSummary(string? Schema, string Name, ObjectType Type, long? ApproxRows)
 {
-    public CatalogItem? Parent { get; init; }
+    public TriggerParent? Parent { get; init; }
 
     /// <summary>The object as the inventory and the script generator name it.</summary>
     public CatalogItem ToItem() => new(Schema, Name, Type.ToWireName());
 }
+
+/// <summary>A DML trigger's table or view, as the catalog reader resolved it. Both are schema-scoped.</summary>
+internal sealed record TriggerParent(string Schema, string Name, ObjectType Type);
 
 /// <summary>
 /// What names resolved to: the <see cref="Objects"/> to script, and the <see cref="Inventory"/> a script of them accounts
@@ -138,6 +141,12 @@ internal sealed record ObjectList(IReadOnlyList<ObjectSummary> Objects, int Tota
 /// </summary>
 internal sealed record ObjectName(string? Schema, string Name)
 {
+    /// <summary>Separates a name's parts in the list the catalog reader resolves in one query, so no name may hold it.</summary>
+    public const char FieldSeparator = '\u001F';
+
+    /// <summary>Ends each name in the list the catalog reader resolves in one query, so no name may hold it.</summary>
+    public const char RecordSeparator = '\u001E';
+
     public ObjectType? Type { get; init; }
 
     /// <summary>
@@ -150,6 +159,12 @@ internal sealed record ObjectName(string? Schema, string Name)
         if (string.IsNullOrWhiteSpace(text))
         {
             error = "Give an object name, such as dbo.orders.";
+            return false;
+        }
+
+        if (text.Contains(FieldSeparator, StringComparison.Ordinal) || text.Contains(RecordSeparator, StringComparison.Ordinal))
+        {
+            error = $"'{text}' holds a control character (U+001E or U+001F), which sql-mcp can't look up.";
             return false;
         }
 

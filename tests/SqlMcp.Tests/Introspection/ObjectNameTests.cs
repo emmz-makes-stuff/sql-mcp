@@ -45,6 +45,16 @@ public sealed class ObjectNameTests
     }
 
     [Theory]
+    [InlineData("[dbo].[a\u001Fb]")]
+    [InlineData("[dbo].[a\u001Eb]")]
+    public void Names_holding_the_list_separators_are_refused(string text)
+    {
+        Assert.False(ObjectName.TryParse(text, out _, out var error));
+
+        Assert.Equal($"'{text}' holds a control character (U+001E or U+001F), which sql-mcp can't look up.", error);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

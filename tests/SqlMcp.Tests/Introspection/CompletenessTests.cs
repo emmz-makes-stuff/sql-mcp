@@ -84,7 +84,7 @@ public sealed class CompletenessTests
         InventoryItem[] inventory =
         [
             new(view, InventoryClass.Scriptable, Encrypted: true),
-            new(trigger, InventoryClass.Scriptable) { Parent = view, ParentEncrypted = true },
+            new(trigger, InventoryClass.Scriptable) { Parent = new TriggerParent("dbo", "secret_view", ObjectType.View), ParentEncrypted = true },
         ];
 
         Assert.Equal(
@@ -96,7 +96,7 @@ public sealed class CompletenessTests
     public void Trigger_on_an_encrypted_view_that_is_not_in_the_inventory()
     {
         var trigger = new CatalogItem("dbo", "secret_view_insert", "trigger");
-        InventoryItem[] inventory = [new(trigger, InventoryClass.Scriptable) { Parent = new CatalogItem("dbo", "secret_view", "view"), ParentEncrypted = true }];
+        InventoryItem[] inventory = [new(trigger, InventoryClass.Scriptable) { Parent = new TriggerParent("dbo", "secret_view", ObjectType.View), ParentEncrypted = true }];
 
         Assert.Equal([new OmittedItem(trigger, Completeness.OnEncryptedView)], Completeness.Omitted(inventory, []));
     }

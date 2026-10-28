@@ -225,20 +225,17 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
     /// </summary>
     private static (TriggerCollection Triggers, bool Encrypted) Owner(Database database, ObjectSummary trigger)
     {
-        var parent = trigger.Parent;
-        if (parent?.Type == ObjectType.Table.ToWireName())
+        switch (trigger.Parent)
         {
-            return (Find(database.Tables[parent.Name, parent.Schema], trigger).Triggers, false);
+            case { Type: ObjectType.Table } parent:
+                return (Find(database.Tables[parent.Name, parent.Schema], trigger).Triggers, false);
+            case { Type: ObjectType.View } parent:
+                var view = Find(database.Views[parent.Name, parent.Schema], trigger);
+                return (view.Triggers, view.IsEncrypted);
+            default:
+                throw new SmoException(
+                    $"'{trigger.Schema}.{trigger.Name}' (trigger) is on a table or view that sql-mcp doesn't list, such as one marked as shipped by Microsoft, so it can't be scripted.");
         }
-
-        if (parent?.Type == ObjectType.View.ToWireName())
-        {
-            var view = Find(database.Views[parent.Name, parent.Schema], trigger);
-            return (view.Triggers, view.IsEncrypted);
-        }
-
-        throw new SmoException(
-            $"'{trigger.Schema}.{trigger.Name}' (trigger) is on a table or view that sql-mcp doesn't list, such as one marked as shipped by Microsoft, so it can't be scripted.");
     }
 
     private static T Find<T>(T? found, ObjectSummary wanted)

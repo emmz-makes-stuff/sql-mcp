@@ -84,6 +84,9 @@ table type can share a `schema.name`.
   A name with three or four parts is refused, as the write tools refuse them.
 - An unqualified name is looked up across all schemas: no match means "not found", and more than one means
   "ambiguous", naming each candidate.
+- Every name a call gives is resolved in one query. The names go in as one parameter: fields separated by U+001F,
+  names ended by U+001E, split by a recursive CTE (`STRING_SPLIT` and `OPENJSON` need compatibility level 130). A
+  name holding either character is refused (Emmz's call, 2026-10-28).
 
 ### I5. Script generation (SMO)
 - `ServerConnection` is built on a `SqlConnection` with the effective connection string, and its

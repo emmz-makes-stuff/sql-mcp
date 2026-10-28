@@ -128,7 +128,7 @@ public sealed class ScriptDatabasePipelineTests : IDisposable
         _builder.Catalog.ResolveOutcome = Resolved(
             [new ObjectSummary("dbo", "orders", ObjectType.Table, null)],
             new InventoryItem(orders, InventoryClass.Scriptable),
-            new InventoryItem(new CatalogItem("dbo", "orders_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = orders });
+            new InventoryItem(new CatalogItem("dbo", "orders_secret", "trigger"), InventoryClass.Scriptable, Encrypted: true) { Parent = new TriggerParent("dbo", "orders", ObjectType.Table) });
         using var session = _builder.Build();
 
         var json = Json(await new ToolPipeline(session).ScriptDatabaseAsync(Sales, Names("dbo.orders"), Cancel));

@@ -74,6 +74,32 @@ public sealed class SqlServerCatalogReaderDescribeTests(SeededDatabases seeded) 
         Assert.Single(await Resolve(seeded.ConnectionString, "dbo.users", "[dbo].[users]", "users"));
     }
 
+    // Past 100 names, the split needs MAXRECURSION 0.
+    [Fact]
+    public async Task Many_names_resolve_in_order()
+    {
+        string[] some = ["dbo.users", "archive.orders", "dbo.orders", "audit_ddl", "id_list", "[dbo].[users]", "\"dbo\".\"archive_orders\""];
+        var texts = Enumerable.Repeat(some, 30).SelectMany(t => t).ToArray();
+
+        var resolved = await Resolve(seeded.ConnectionString, texts);
+
+        Assert.Equal(
+            ["dbo.users", "archive.orders", "dbo.orders", "audit_ddl", "dbo.id_list", "dbo.archive_orders"],
+            resolved.Select(o => o.Schema is null ? o.Name : $"{o.Schema}.{o.Name}"));
+    }
+
+    [Fact]
+    public async Task Many_names_with_an_ambiguous_one()
+    {
+        var texts = Enumerable.Repeat("dbo.users", 150).Append("orders").Append("dbo.orders").Append("dbo.users").ToArray();
+
+        var failed = await ResolveFails(seeded.ConnectionString, texts);
+
+        Assert.Equal(
+            "'orders' is ambiguous: it matches archive.orders (table), dbo.orders (table). Give a schema-qualified name, such as archive.orders.",
+            failed.Message);
+    }
+
     [Fact]
     public async Task Table_with_keys()
     {

@@ -167,7 +167,7 @@ public sealed class SmoScriptGeneratorTests(SqlServerFixture server, SeededDatab
         var resolution = await ResolveAsync(seeded.ConnectionString, new ObjectName("dbo", "orders_status"));
         var (script, scripted) = await GenerateAsync(resolution.Objects);
 
-        Assert.Equal(new CatalogItem("dbo", "orders", "table"), Assert.Single(resolution.Objects).Parent);
+        Assert.Equal(new TriggerParent("dbo", "orders", ObjectType.Table), Assert.Single(resolution.Objects).Parent);
         Assert.Equal([new CatalogItem("dbo", "orders_status", "trigger")], scripted);
         Assert.Contains("CREATE TRIGGER [dbo].[orders_status]", script, StringComparison.Ordinal);
         Assert.DoesNotContain("CREATE TABLE", script, StringComparison.Ordinal);
