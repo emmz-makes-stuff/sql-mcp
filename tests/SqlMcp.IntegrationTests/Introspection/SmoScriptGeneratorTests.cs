@@ -182,7 +182,57 @@ public sealed class SmoScriptGeneratorTests(SqlServerFixture server, SeededDatab
 
         var failed = Assert.IsType<CatalogFailed<IReadOnlyList<CatalogItem>>>(outcome);
         Assert.Equal(FailureKind.Other, failed.Kind);
-        Assert.Contains("'dbo.orders_status' (trigger) was not found when scripting began.", failed.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            "scripting failed: 'dbo.orders_status' (trigger) is on a table or view that sql-mcp doesn't list, such as one marked as shipped by Microsoft, so it can't be scripted.",
+            failed.Message);
+    }
+
+    [Fact]
+    public async Task A_trigger_chosen_with_its_table_is_scripted_once()
+    {
+        var connectionString = await server.CreateDatabaseAsync($"trigger_twice_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(connectionString, """
+            CREATE TABLE dbo.accounts (id int NOT NULL PRIMARY KEY);
+            GO
+            CREATE TRIGGER dbo.accounts_audit ON dbo.accounts AFTER INSERT AS BEGIN SET NOCOUNT ON; END;
+            GO
+            """);
+        var resolution = await ResolveAsync(connectionString, new ObjectName("dbo", "accounts"), new ObjectName("dbo", "accounts_audit"));
+        var writer = new StringWriter();
+
+        var outcome = await _generator.GenerateAsync(connectionString, resolution.Objects, writer, EffectiveLimits.Default, Cancel);
+
+        Assert.Equal(
+            [new CatalogItem("dbo", "accounts", "table"), new CatalogItem("dbo", "accounts_audit", "trigger")],
+            Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value);
+        Assert.Equal(1, writer.ToString().Split("CREATE TRIGGER").Length - 1);
+        var copy = await server.CreateDatabaseAsync($"trigger_twice_copy_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(copy, writer.ToString());
+    }
+
+    [Fact]
+    public async Task A_chosen_trigger_on_an_encrypted_view_goes_with_the_view()
+    {
+        var connectionString = await server.CreateDatabaseAsync($"view_trigger_{Guid.NewGuid().ToString("N")[..8]}");
+        await SqlServerFixture.RunScriptAsync(connectionString, """
+            CREATE TABLE dbo.accounts (id int NOT NULL PRIMARY KEY);
+            GO
+            CREATE VIEW dbo.secret_accounts WITH ENCRYPTION AS SELECT id FROM dbo.accounts;
+            GO
+            CREATE TRIGGER dbo.secret_accounts_insert ON dbo.secret_accounts INSTEAD OF INSERT AS BEGIN SET NOCOUNT ON; END;
+            GO
+            """);
+        var resolution = await ResolveAsync(connectionString, new ObjectName("dbo", "secret_accounts_insert"));
+        var writer = new StringWriter();
+
+        var outcome = await _generator.GenerateAsync(connectionString, resolution.Objects, writer, EffectiveLimits.Default, Cancel);
+
+        var scripted = Assert.IsType<CatalogSucceeded<IReadOnlyList<CatalogItem>>>(outcome).Value;
+        Assert.Empty(scripted);
+        Assert.Empty(writer.ToString());
+        Assert.Equal(
+            [new OmittedItem(new CatalogItem("dbo", "secret_accounts_insert", "trigger"), Completeness.OnEncryptedView)],
+            Completeness.Omitted(resolution.Inventory, scripted));
     }
 
     [Fact]

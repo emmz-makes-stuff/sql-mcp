@@ -47,11 +47,14 @@ internal enum InventoryClass
 
 /// <summary>
 /// One entry in a database's inventory. <see cref="Encrypted"/> is true for a module created <c>WITH ENCRYPTION</c>.
-/// <see cref="Parent"/> is a DML trigger's table or view, and null for everything else.
+/// <see cref="Parent"/> is a DML trigger's table or view, and null for everything else. <see cref="ParentEncrypted"/>
+/// says that view is encrypted, so the trigger goes with it, whether or not the view is in the same inventory.
 /// </summary>
 internal sealed record InventoryItem(CatalogItem Item, InventoryClass Class, bool Encrypted = false)
 {
     public CatalogItem? Parent { get; init; }
+
+    public bool ParentEncrypted { get; init; }
 }
 
 /// <summary>Something the script leaves out, and why (design I5). <see cref="Reason"/> is one of the <see cref="Completeness"/> reasons.</summary>
@@ -78,14 +81,13 @@ internal static class Completeness
     public static IReadOnlyList<OmittedItem> Omitted(IReadOnlyList<InventoryItem> inventory, IReadOnlyCollection<CatalogItem> scripted)
     {
         var done = scripted as IReadOnlySet<CatalogItem> ?? scripted.ToHashSet();
-        var encrypted = inventory.Where(entry => entry.Encrypted).Select(entry => entry.Item).ToHashSet();
-        return [.. inventory.Where(entry => !done.Contains(entry.Item)).Select(entry => new OmittedItem(entry.Item, Reason(entry, encrypted)))];
+        return [.. inventory.Where(entry => !done.Contains(entry.Item)).Select(entry => new OmittedItem(entry.Item, Reason(entry)))];
     }
 
-    private static string Reason(InventoryItem entry, HashSet<CatalogItem> encrypted) => entry switch
+    private static string Reason(InventoryItem entry) => entry switch
     {
         { Encrypted: true } => Encrypted,
-        { Parent: { } parent } when encrypted.Contains(parent) => OnEncryptedView,
+        { Parent: not null, ParentEncrypted: true } => OnEncryptedView,
         { Class: InventoryClass.SecurityPrincipal } => SecurityPrincipal,
         { Class: InventoryClass.SecurityObject } => SecurityObject,
         _ => NotScripted,

@@ -105,6 +105,23 @@ public sealed class ObjectNameTests
     }
 
     [Fact]
+    public void An_object_and_a_type_with_the_same_name_among_other_schemas()
+    {
+        var problem = NameResolution.Problem(
+            new ObjectName(null, "address"),
+            [
+                new ObjectSummary("dbo", "address", ObjectType.Table, null),
+                new ObjectSummary("dbo", "address", ObjectType.TableType, null),
+                new ObjectSummary("sales", "address", ObjectType.Table, null),
+            ]);
+
+        Assert.Equal(
+            "'address' is ambiguous: it matches dbo.address (table), dbo.address (table_type), sales.address (table). "
+                + "Give a schema-qualified name, such as dbo.address. In dbo, an object and a type share the name, so give its type too, such as table_type.",
+            problem);
+    }
+
+    [Fact]
     public void Unknown_object_of_a_type()
     {
         var problem = NameResolution.Problem(new ObjectName("dbo", "address") { Type = ObjectType.View }, []);

@@ -95,7 +95,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// table type can share a name; <c>@type</c> tells them apart.
     /// </summary>
     private const string ResolveSql = EntriesCte + $"""
-        SELECT e.schema_name, e.name, e.type, e.id, e.code, e.encrypted, p.schema_name, p.name, p.type
+        SELECT e.schema_name, e.name, e.type, e.id, e.code, e.encrypted, p.schema_name, p.name, p.type, p.encrypted
         FROM entries AS e
         {ParentJoin}
         WHERE e.name = @name AND (@schema IS NULL OR e.schema_name = @schema) AND (@type IS NULL OR e.type = @type)
@@ -107,17 +107,17 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// inventory of a script of chosen objects. Matched with <c>CHARINDEX</c>, as <see cref="ListSql"/> matches types.
     /// </summary>
     private const string ChildTriggersSql = EntriesCte + """
-        SELECT e.schema_name, e.name, e.type, e.encrypted, p.schema_name, p.name, p.type
+        SELECT e.schema_name, e.name, e.type, e.encrypted, p.schema_name, p.name, p.type, p.encrypted
         FROM entries AS e
-        JOIN objects AS p ON p.id = e.parent_id AND p.code IN ('U', 'V')
+        JOIN entries AS p ON p.id = e.parent_id AND p.code IN ('U', 'V')
         WHERE e.code IN ('TR', 'TA') AND CHARINDEX(',' + CAST(e.parent_id AS varchar(11)) + ',', ',' + @ids + ',') > 0;
         """;
 
     /// <summary>
-    /// A DML trigger's table or view as <c>p</c>, for an entry <c>e</c>. Only objects have a parent, and a type's id
+    /// A DML trigger's table or view as <c>p</c>, with its encryption, for an entry <c>e</c>. Only objects have a parent, and a type's id
     /// can equal an object's, so types never match.
     /// </summary>
-    private const string ParentJoin = "LEFT JOIN objects AS p ON p.id = e.parent_id AND e.parent_id <> 0 AND p.code NOT IN ('TT', 'UT')";
+    private const string ParentJoin = "LEFT JOIN entries AS p ON p.id = e.parent_id AND e.parent_id <> 0 AND p.code NOT IN ('TT', 'UT')";
 
     /// <summary>
     /// Everything a whole-database script accounts for (design I5). <c>class</c> is the <see cref="InventoryClass"/>:
@@ -173,7 +173,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             UNION ALL
             SELECT NULL, name, 'database_scoped_credential', 2, CAST(0 AS bit), NULL FROM sys.database_scoped_credentials
         )
-        SELECT e.schema_name, e.name, e.type, e.class, e.encrypted, p.schema_name, p.name, p.type
+        SELECT e.schema_name, e.name, e.type, e.class, e.encrypted, p.schema_name, p.name, p.type, p.encrypted
         FROM inventory AS e
         {ParentJoin}
         ORDER BY e.class, e.type, e.schema_name, e.name;
@@ -344,7 +344,11 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         ReadAsync(connectionString, limits, async connection =>
         {
             var resolved = (await ResolveAllAsync(connection, names, limits, cancellationToken).ConfigureAwait(false)).DistinctBy(r => r.Summary).ToList();
-            var inventory = resolved.Select(r => new InventoryItem(r.Summary.ToItem(), InventoryClass.Scriptable, r.Encrypted) { Parent = r.Summary.Parent }).ToList();
+            var inventory = resolved.Select(r => new InventoryItem(r.Summary.ToItem(), InventoryClass.Scriptable, r.Encrypted)
+            {
+                Parent = r.Summary.Parent,
+                ParentEncrypted = r.ParentEncrypted,
+            }).ToList();
             var parents = resolved.Where(r => r.Code is "U" or "V").Select(r => r.Id.ToString(CultureInfo.InvariantCulture)).ToList();
             if (parents.Count > 0)
             {
@@ -356,6 +360,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                     inventory.Add(new InventoryItem(new CatalogItem(reader.GetString(0), reader.GetString(1), reader.GetString(2)), InventoryClass.Scriptable, reader.GetBoolean(3))
                     {
                         Parent = ParentAt(reader, 4),
+                        ParentEncrypted = ParentEncryptedAt(reader, 4),
                     });
                 }
             }
@@ -400,6 +405,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                     reader.GetBoolean(4))
                 {
                     Parent = ParentAt(reader, 5),
+                    ParentEncrypted = ParentEncryptedAt(reader, 5),
                 });
             }
 
@@ -414,7 +420,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
         }, cancellationToken);
 
     /// <summary>An object a name resolved to, with what the describe queries and the chosen inventory need.</summary>
-    private sealed record Resolved(ObjectSummary Summary, int Id, string Code, bool Encrypted);
+    private sealed record Resolved(ObjectSummary Summary, int Id, string Code, bool Encrypted, bool ParentEncrypted);
 
     /// <summary>
     /// Resolves every name on one connection. If any fails, throws <see cref="UnresolvedNameException"/> with every
@@ -439,7 +445,7 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
                     {
                         Parent = ParentAt(reader, 6),
                     };
-                    candidates.Add(new Resolved(summary, reader.GetInt32(3), reader.GetString(4), reader.GetBoolean(5)));
+                    candidates.Add(new Resolved(summary, reader.GetInt32(3), reader.GetString(4), reader.GetBoolean(5), ParentEncryptedAt(reader, 6)));
                 }
             }
 
@@ -655,6 +661,9 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
     /// <summary>A DML trigger's table or view from <see cref="ParentJoin"/>'s schema, name and type, at <paramref name="at"/>.</summary>
     private static CatalogItem? ParentAt(SqlDataReader r, int at) =>
         r.IsDBNull(at + 1) ? null : new CatalogItem(r.IsDBNull(at) ? null : r.GetString(at), r.GetString(at + 1), r.GetString(at + 2));
+
+    /// <summary>Whether that table or view is encrypted, from the column after its type; false when there is none.</summary>
+    private static bool ParentEncryptedAt(SqlDataReader r, int at) => !r.IsDBNull(at + 3) && r.GetBoolean(at + 3);
 
     private static ObjectType ParseType(string wire) =>
         ObjectTypes.TryParse(wire, out var type) ? type : throw new InvalidOperationException($"The catalog query returned an unknown object type '{wire}'.");

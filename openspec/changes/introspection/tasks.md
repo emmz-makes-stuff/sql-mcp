@@ -81,10 +81,10 @@
 
 ## 9. Review fixes: chosen triggers and messages (code-review of §7–§8, 2026-10-28)
 
-- [ ] 9.1 Script a trigger once when both it and its table or view are chosen: remove duplicate URNs from the generator's trigger list, as `Walk` does for walked candidates. Verify with a generator itest naming `dbo.orders` and `dbo.orders_status` (one `CREATE TRIGGER`, one scripted item), and a round trip of that script
-- [ ] 9.2 A chosen DML trigger on an encrypted view is left out, as it is in a whole-database script: resolution gives the trigger's parent with its encryption, the generator skips it, and the omitted list names it `on an encrypted view`. Verify with a generator itest
-- [ ] 9.3 A DML trigger whose table or view resolution can't name (a parent outside the catalog query, such as one marked `is_ms_shipped`) fails with a message that says so, not "was not found when scripting began". Verify with a unit-level generator test using a parentless trigger summary
-- [ ] 9.4 When the candidates for an ambiguous name include an object and a type with the same name in one schema, the message also says to give `type`, even when other schemas match too. Verify with a `NameResolution` unit test (mixed schemas, plus a table and a table type in one schema)
+- [x] 9.1 Script a trigger once when both it and its table or view are chosen: remove duplicate URNs from the generator's trigger list, as `Walk` does for walked candidates. Verify with a generator itest naming `dbo.orders` and `dbo.orders_status` (one `CREATE TRIGGER`, one scripted item), and a round trip of that script
+- [x] 9.2 A chosen DML trigger on an encrypted view is left out, as it is in a whole-database script: resolution gives the trigger's parent with its encryption, the generator skips it, and the omitted list names it `on an encrypted view`. Verify with a generator itest
+- [x] 9.3 A DML trigger whose table or view resolution can't name (a parent outside the catalog query, such as one marked `is_ms_shipped`) fails with a message that says so, not "was not found when scripting began". Verify with a unit-level generator test using a parentless trigger summary
+- [x] 9.4 When the candidates for an ambiguous name include an object and a type with the same name in one schema, the message also says to give `type`, even when other schemas match too. Verify with a `NameResolution` unit test (mixed schemas, plus a table and a table type in one schema)
 
 ## 10. Review fixes: batch resolution and types (code-review of §7–§8, 2026-10-28)
 

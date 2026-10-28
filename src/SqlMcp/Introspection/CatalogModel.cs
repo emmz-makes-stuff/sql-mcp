@@ -196,8 +196,17 @@ internal static class NameResolution
         1 => null,
         _ when candidates.Select(c => c.Schema).Distinct().Count() == 1 =>
             $"'{name}' is ambiguous: it matches {string.Join(", ", candidates.Select(Describe))}, an object and a type with the same name. Give its type too, such as {candidates[^1].Type.ToWireName()}.",
-        _ => $"'{name}' is ambiguous: it matches {string.Join(", ", candidates.Select(Describe))}. Give a schema-qualified name, such as {Example(candidates)}.",
+        _ => $"'{name}' is ambiguous: it matches {string.Join(", ", candidates.Select(Describe))}. Give a schema-qualified name, such as {Example(candidates)}.{TypeClash(candidates)}",
     };
+
+    /// <summary>
+    /// When one schema holds both an object and a type of that name, a schema-qualified name still matches two, so
+    /// the message says to give the type as well (code review, 2026-10-28).
+    /// </summary>
+    private static string TypeClash(IReadOnlyList<ObjectSummary> candidates) =>
+        candidates.GroupBy(c => c.Schema).FirstOrDefault(g => g.Count() > 1) is { } clash
+            ? $" In {clash.Key}, an object and a type share the name, so give its type too, such as {clash.Last().Type.ToWireName()}."
+            : "";
 
     private static string Describe(ObjectSummary candidate) =>
         $"{(candidate.Schema is null ? candidate.Name : $"{candidate.Schema}.{candidate.Name}")} ({candidate.Type.ToWireName()})";

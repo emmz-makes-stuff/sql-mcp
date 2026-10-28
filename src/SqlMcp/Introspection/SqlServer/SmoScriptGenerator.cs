@@ -135,9 +135,9 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
 
     /// <summary>
     /// The objects named, each with its own triggers, and nothing they depend on (spec: scripting chosen objects).
-    /// Encrypted modules are left out, for the completeness check to name. A name the catalog reader resolved but SMO
-    /// can't find (dropped in between, say, or a DML trigger without its <see cref="ObjectSummary.Parent"/>) is an
-    /// error rather than a silent gap.
+    /// Encrypted modules, and the triggers of an encrypted view, are left out, for the completeness check to name. A
+    /// name the catalog reader resolved but SMO can't find (dropped in between, say) is an error rather than a silent
+    /// gap, and so is a DML trigger without its <see cref="ObjectSummary.Parent"/>.
     /// </summary>
     private static Plan Chosen(Database database, IReadOnlyList<ObjectSummary> objects)
     {
@@ -180,15 +180,10 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
                     AddUnlessEncrypted(Find(database.Triggers[o.Name], o), t => t.IsEncrypted);
                     break;
                 case ObjectType.Trigger:
-                    // Through the table or view the reader resolved, rather than loading every one's triggers.
-                    var owner = o.Parent switch
-                    {
-                        { Type: var type } parent when type == ObjectType.Table.ToWireName() => database.Tables[parent.Name, parent.Schema]?.Triggers,
-                        { Type: var type } parent when type == ObjectType.View.ToWireName() => database.Views[parent.Name, parent.Schema]?.Triggers,
-                        _ => null,
-                    };
-                    var trigger = Find(owner?[o.Name], o);
-                    if (!trigger.IsEncrypted)
+                    // A trigger on an encrypted view goes with the view, as in a whole-database script.
+                    var (owner, ownerEncrypted) = Owner(database, o);
+                    var trigger = Find(owner[o.Name], o);
+                    if (!trigger.IsEncrypted && !ownerEncrypted)
                     {
                         triggers.Add(Of(trigger, o.Schema, wire));
                     }
@@ -220,7 +215,30 @@ internal sealed class SmoScriptGenerator(TimeProvider time) : IScriptGenerator
             }
         }
 
-        return new Plan([], walked, triggers);
+        // A trigger named alongside its table or view is in the list twice; script it once.
+        return new Plan([], walked, [.. triggers.DistinctBy(c => c.Urn.ToString(), StringComparer.Ordinal)]);
+    }
+
+    /// <summary>
+    /// A chosen DML trigger's table or view, found through the parent the reader resolved rather than by loading every
+    /// table's and view's triggers, and whether it is an encrypted view.
+    /// </summary>
+    private static (TriggerCollection Triggers, bool Encrypted) Owner(Database database, ObjectSummary trigger)
+    {
+        var parent = trigger.Parent;
+        if (parent?.Type == ObjectType.Table.ToWireName())
+        {
+            return (Find(database.Tables[parent.Name, parent.Schema], trigger).Triggers, false);
+        }
+
+        if (parent?.Type == ObjectType.View.ToWireName())
+        {
+            var view = Find(database.Views[parent.Name, parent.Schema], trigger);
+            return (view.Triggers, view.IsEncrypted);
+        }
+
+        throw new SmoException(
+            $"'{trigger.Schema}.{trigger.Name}' (trigger) is on a table or view that sql-mcp doesn't list, such as one marked as shipped by Microsoft, so it can't be scripted.");
     }
 
     private static T Find<T>(T? found, ObjectSummary wanted)

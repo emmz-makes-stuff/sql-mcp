@@ -158,7 +158,8 @@ type, and the objects it left out. The script text never goes through the MCP re
 - **Chosen objects:** given a list of names, it scripts only those objects, with their own keys, indexes and
   triggers, and not the objects they depend on. An entry is a name, or `{"name": …, "type": …}` when a table and a
   table type (say) share a name. If any name isn't found, no file is written. Its omitted list covers only the
-  objects named and their own triggers, such as an encrypted trigger on a chosen table.
+  objects named and their own triggers, such as an encrypted trigger on a chosen table, or a chosen trigger on an
+  encrypted view, which is left out as it is from a whole-database script.
 - **What is omitted:** for a whole database, everything the catalog holds is either scripted or listed as omitted,
   with the reason: users, roles, application roles and permissions (security principals); certificates, keys and
   database-scoped credentials (security objects); encrypted definitions, and the triggers of an encrypted view; and
