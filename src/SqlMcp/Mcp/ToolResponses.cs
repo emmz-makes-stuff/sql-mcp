@@ -197,3 +197,19 @@ internal sealed record ObjectDetailsResponse(
 
     private static IReadOnlyList<T>? NullIfEmpty<T>(IReadOnlyList<T>? items) => items is { Count: > 0 } ? items : null;
 }
+
+/// <summary>
+/// What <c>script_database</c> returns (design I7): where the script is, its size, how many objects of each type it
+/// holds, and what it left out with why. Never the script text: the agent reads the file.
+/// </summary>
+internal sealed record ScriptResponse(string Path, long Bytes, IReadOnlyDictionary<string, int> Counts, IReadOnlyList<OmittedEntry> Omitted)
+{
+    public static ScriptResponse From(ScriptResult script) => new(
+        script.Path,
+        script.Bytes,
+        script.Counts,
+        [.. script.Omitted.Select(o => new OmittedEntry(o.Item.Schema, o.Item.Name, o.Item.Type, o.Reason))]);
+}
+
+/// <summary>One object the script left out. Something that isn't schema-scoped, such as a user, has no schema.</summary>
+internal sealed record OmittedEntry(string? Schema, string Name, string Type, string Reason);

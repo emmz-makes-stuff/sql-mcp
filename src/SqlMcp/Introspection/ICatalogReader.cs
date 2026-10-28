@@ -27,6 +27,9 @@ internal interface ICatalogReader
     /// what the generator is expected to script, plus the principals and security objects it never scripts. Uncapped.
     /// </summary>
     Task<CatalogOutcome<IReadOnlyList<InventoryItem>>> InventoryAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken);
+
+    /// <summary>The server's product version, such as <c>17.0.1000.7</c>, for a script's header (design I6).</summary>
+    Task<CatalogOutcome<string>> ServerVersionAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken);
 }
 
 /// <summary>How a catalog read ended. Failures carry the same kinds as an executor's, so they audit the same way.</summary>

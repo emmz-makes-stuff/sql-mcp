@@ -55,6 +55,18 @@ internal sealed class FakeCatalogReader : ICatalogReader
     public CatalogOutcome<ObjectDetails> DescribeOutcome { get; set; } =
         new CatalogSucceeded<ObjectDetails>(new ObjectDetails("dbo", "orders", ObjectType.Table), TimeSpan.FromMilliseconds(4));
 
+    public List<IReadOnlyList<ObjectName>> Resolves { get; } = [];
+
+    /// <summary>The objects names resolve to. By default each name resolves to a table of that name in <c>dbo</c>.</summary>
+    public CatalogOutcome<IReadOnlyList<ObjectSummary>>? ResolveOutcome { get; set; }
+
+    public int Inventories { get; private set; }
+
+    public CatalogOutcome<IReadOnlyList<InventoryItem>> InventoryOutcome { get; set; } =
+        new CatalogSucceeded<IReadOnlyList<InventoryItem>>([], TimeSpan.FromMilliseconds(4));
+
+    public CatalogOutcome<string> ServerVersionOutcome { get; set; } = new CatalogSucceeded<string>("17.0.1000.7", TimeSpan.FromMilliseconds(1));
+
     /// <summary>When set, the call is cancelled as if the client gave up while the catalog was read.</summary>
     public bool Cancels { get; set; }
 
@@ -69,8 +81,9 @@ internal sealed class FakeCatalogReader : ICatalogReader
 
     public Task<CatalogOutcome<IReadOnlyList<ObjectSummary>>> ResolveAsync(string connectionString, IReadOnlyList<ObjectName> names, EffectiveLimits limits, CancellationToken cancellationToken)
     {
-        // No tool resolves names on their own until script_database (section 4).
-        throw new NotSupportedException();
+        Resolves.Add(names);
+        return Respond(ResolveOutcome ?? new CatalogSucceeded<IReadOnlyList<ObjectSummary>>(
+            [.. names.Select(n => new ObjectSummary(n.Schema ?? "dbo", n.Name, ObjectType.Table, null))], TimeSpan.FromMilliseconds(2)));
     }
 
     public Task<CatalogOutcome<ObjectDetails>> DescribeAsync(string connectionString, ObjectName name, EffectiveLimits limits, CancellationToken cancellationToken)
@@ -81,9 +94,12 @@ internal sealed class FakeCatalogReader : ICatalogReader
 
     public Task<CatalogOutcome<IReadOnlyList<InventoryItem>>> InventoryAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken)
     {
-        // No tool takes an inventory until script_database (section 5).
-        throw new NotSupportedException();
+        Inventories++;
+        return Respond(InventoryOutcome);
     }
+
+    public Task<CatalogOutcome<string>> ServerVersionAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken) =>
+        Respond(ServerVersionOutcome);
 
     private Task<CatalogOutcome<T>> Respond<T>(CatalogOutcome<T> outcome)
     {
@@ -96,12 +112,36 @@ internal sealed class FakeCatalogReader : ICatalogReader
     }
 }
 
-/// <summary>A script generator for sessions that never script; script_database's pipeline tests give it behaviour (section 5).</summary>
+/// <summary>A script generator that records what it was asked to script, writes <see cref="Text"/>, and returns a canned outcome.</summary>
 internal sealed class FakeScriptGenerator : IScriptGenerator
 {
-    public Task<CatalogOutcome<IReadOnlyList<CatalogItem>>> GenerateAsync(
-        string connectionString, IReadOnlyList<ObjectSummary>? objects, TextWriter writer, EffectiveLimits limits, CancellationToken cancellationToken) =>
-        throw new NotSupportedException();
+    /// <summary>The objects each call was given: null for the whole database.</summary>
+    public List<IReadOnlyList<ObjectSummary>?> Calls { get; } = [];
+
+    public string Text { get; set; } = "CREATE TABLE dbo.orders (id int);\nGO\n";
+
+    public CatalogOutcome<IReadOnlyList<CatalogItem>> Outcome { get; set; } =
+        new CatalogSucceeded<IReadOnlyList<CatalogItem>>([new CatalogItem("dbo", "orders", "table")], TimeSpan.FromMilliseconds(6));
+
+    /// <summary>When set, the call is cancelled part way through, after writing <see cref="Text"/>.</summary>
+    public bool Cancels { get; set; }
+
+    /// <summary>Runs after <see cref="Text"/> is written, e.g. to take the audit log away before the outcome is logged.</summary>
+    public Action? During { get; set; }
+
+    public async Task<CatalogOutcome<IReadOnlyList<CatalogItem>>> GenerateAsync(
+        string connectionString, IReadOnlyList<ObjectSummary>? objects, TextWriter writer, EffectiveLimits limits, CancellationToken cancellationToken)
+    {
+        Calls.Add(objects);
+        await writer.WriteAsync(Text);
+        During?.Invoke();
+        if (Cancels)
+        {
+            throw new OperationCanceledException();
+        }
+
+        return Outcome;
+    }
 }
 
 /// <summary>
@@ -146,7 +186,7 @@ internal sealed class SessionBuilder : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "project", ".sql-mcp"));
         var audit = AuditLog.Open(Paths.ProjectDirectory, Path.Combine(_temp.Path, "fallback"), Time, 4242);
         var engines = new Dictionary<Engine, EngineServices> { [Engine.SqlServer] = new(new SqlServerStatementClassifier(), Executor, Catalog, Scripts) };
-        return SqlMcpSession.Load(Paths, name => _environment.GetValueOrDefault(name), audit, Time, engines, "1.2.3-test");
+        return SqlMcpSession.Load(Paths, name => _environment.GetValueOrDefault(name), audit, Time, engines, "1.2.3-test", Path.Combine(_temp.Path, "scripts-fallback"));
     }
 
     /// <summary>The audit log's events, one JSON object per line.</summary>

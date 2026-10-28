@@ -40,17 +40,17 @@ public sealed class AuditLogTests : IDisposable
         Assert.True(log.IsAvailable);
         Assert.Equal(Path.Combine(Project, ".sql-mcp", "logs", "20261025T180512Z-4242.jsonl"), log.FilePath);
         Assert.True(File.Exists(log.FilePath));
-        Assert.Equal("logs/\n", File.ReadAllText(Path.Combine(Project, ".sql-mcp", ".gitignore")));
+        Assert.Equal("logs/\nscripts/\n", File.ReadAllText(Path.Combine(Project, ".sql-mcp", ".gitignore")));
     }
 
     [Fact]
-    public void An_existing_gitignore_is_left_alone()
+    public void An_existing_gitignore_keeps_its_lines_and_gains_the_missing_ones()
     {
         _temp.Write("project/.sql-mcp/.gitignore", "logs/\n*.local.json\n");
 
         using var log = Open();
 
-        Assert.Equal("logs/\n*.local.json\n", File.ReadAllText(Path.Combine(Project, ".sql-mcp", ".gitignore")));
+        Assert.Equal("logs/\n*.local.json\nscripts/\n", File.ReadAllText(Path.Combine(Project, ".sql-mcp", ".gitignore")));
     }
 
     [Fact]

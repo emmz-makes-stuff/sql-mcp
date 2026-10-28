@@ -54,7 +54,7 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "next_page", "abandon", "list_objects", "describe_object"], Names(session));
+        Assert.Equal(["list_databases", "query", "next_page", "abandon", "list_objects", "describe_object", "script_database"], Names(session));
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User(AllWrites);
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon", "list_objects", "describe_object"], Names(session));
+        Assert.Equal(["list_databases", "query", "command", "ddl", "execute", "next_page", "abandon", "list_objects", "describe_object", "script_database"], Names(session));
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class ToolCatalogTests : IDisposable
         _builder.User("""{ "defaults": { "deny": ["query"] }, "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
         using var session = _builder.Build();
 
-        Assert.Equal(["list_databases", "list_objects", "describe_object"], Names(session));
+        Assert.Equal(["list_databases", "list_objects", "describe_object", "script_database"], Names(session));
     }
 
     [Fact]
@@ -176,6 +176,7 @@ public sealed class ToolCatalogTests : IDisposable
 
         Assert.DoesNotContain(ToolNames.ListObjects, Names(session));
         Assert.DoesNotContain(ToolNames.DescribeObject, Names(session));
+        Assert.DoesNotContain(ToolNames.ScriptDatabase, Names(session));
     }
 
     [Fact]
@@ -186,6 +187,7 @@ public sealed class ToolCatalogTests : IDisposable
 
         Assert.Contains(ToolNames.ListObjects, Names(session));
         Assert.Contains(ToolNames.DescribeObject, Names(session));
+        Assert.Contains(ToolNames.ScriptDatabase, Names(session));
     }
 
     [Fact]
@@ -218,6 +220,25 @@ public sealed class ToolCatalogTests : IDisposable
         Assert.False(describeObject.Annotations?.OpenWorldHint);
         Assert.Contains("Use list_objects to find names", describeObject.Description, StringComparison.Ordinal);
         Assert.Contains("Only objects the database login can see are shown", describeObject.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Agent_reads_the_script_database_description()
+    {
+        _builder.User("""{ "databases": [ { "connectionString": "Server=sqlhost;Database=Sales" } ] }""");
+        using var session = _builder.Build();
+
+        var scriptDatabase = Tool(session, ToolNames.ScriptDatabase);
+
+        // Read-only by Emmz's 2026-10-26 decision: it never changes the database, and writes only a new, git-ignored file.
+        Assert.True(scriptDatabase.Annotations?.ReadOnlyHint);
+        Assert.False(scriptDatabase.Annotations?.DestructiveHint);
+        Assert.False(scriptDatabase.Annotations?.OpenWorldHint);
+        Assert.Contains("schema only: no data", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("written to a new file, not returned: read it from the path in the result", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("lists every object left out and why", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("separated by lines holding only GO", scriptDatabase.Description, StringComparison.Ordinal);
+        Assert.Contains("Only objects the database login can see are shown", scriptDatabase.Description, StringComparison.Ordinal);
     }
 
     [Fact]

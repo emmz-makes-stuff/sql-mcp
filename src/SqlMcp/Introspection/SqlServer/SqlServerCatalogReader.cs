@@ -325,6 +325,13 @@ internal sealed class SqlServerCatalogReader(TimeProvider time) : ICatalogReader
             return items;
         }, cancellationToken);
 
+    public Task<CatalogOutcome<string>> ServerVersionAsync(string connectionString, EffectiveLimits limits, CancellationToken cancellationToken) =>
+        ReadAsync(connectionString, limits, async connection =>
+        {
+            await using var command = Command(connection, "SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128));", limits);
+            return (string)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
     /// <summary>An object a name resolved to, with what the describe queries need to find it.</summary>
     private sealed record Resolved(ObjectSummary Summary, int Id, string Code);
 

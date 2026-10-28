@@ -45,6 +45,15 @@ internal static class ToolDescriptions
         "For a sequence, synonym, type or table type: its settings, target, base type, or columns and constraints. Parts that don't apply or are empty are left out. " +
         VisibilityGuidance;
 
+    public const string ScriptDatabase =
+        "Writes a T-SQL script that creates one database's schema: schemas, tables with their keys, constraints, indexes and triggers, views, procedures, functions, sequences, synonyms, types and table types, each after the objects it depends on. " +
+        "The script holds schema only: no data, and no CREATE DATABASE, so run it in an existing, empty database. Batches are separated by lines holding only GO. " +
+        "The script is written to a new file, not returned: read it from the path in the result, which also gives its size and the number of objects scripted by type. " +
+        "With no object list, the whole database is scripted, and the result lists every object left out and why: users, roles and permissions are never scripted, nor are encrypted definitions. " +
+        "With a list of names (schema.name, resolved as describe_object resolves them), only those objects are scripted, without the objects they depend on; if any name isn't found, no file is written. " +
+        "The database is never changed. " +
+        VisibilityGuidance;
+
     /// <summary>What every write tool)'s description says about the transaction and the cap (spec: write tool descriptions).</summary>
     private const string WriteGuidance =
         "The batch runs in one transaction and commits all or nothing: if any statement fails, the batch times out, or its statements together affect more rows than the affected-rows cap, everything is rolled back. " +
@@ -138,6 +147,9 @@ internal static class ToolCatalog
         {
             list.Add(Create(tools, nameof(SqlMcpTools.ListObjects), ToolNames.ListObjects, ToolDescriptions.ListObjects));
             list.Add(Create(tools, nameof(SqlMcpTools.DescribeObject), ToolNames.DescribeObject, ToolDescriptions.DescribeObject));
+
+            // Read-only too (2026-10-26 decision): it never changes the database, and only ever writes a new, git-ignored file.
+            list.Add(Create(tools, nameof(SqlMcpTools.ScriptDatabase), ToolNames.ScriptDatabase, ToolDescriptions.ScriptDatabase));
         }
 
         return list;
@@ -216,6 +228,12 @@ internal sealed class SqlMcpTools(ToolPipeline pipeline)
         [Description("The object's name as schema.name, such as dbo.orders or [sales].[open orders]. A name without a schema works only when exactly one object has it.")] string name,
         CancellationToken cancellationToken) =>
         ToCallResult(await pipeline.DescribeObjectAsync(database, name, cancellationToken).ConfigureAwait(false));
+
+    public async Task<CallToolResult> ScriptDatabase(
+        [Description(DatabaseParameter)] string database,
+        [Description("Only these objects, each as schema.name, such as dbo.orders. Optional: leave it out to script the whole database.")] string[]? objects = null,
+        CancellationToken cancellationToken = default) =>
+        ToCallResult(await pipeline.ScriptDatabaseAsync(database, objects, cancellationToken).ConfigureAwait(false));
 
     public CallToolResult NextPage([Description(HandleParameter)] string handle) => ToCallResult(pipeline.NextPage(handle));
 

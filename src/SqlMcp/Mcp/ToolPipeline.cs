@@ -20,6 +20,7 @@ internal static class ToolNames
     public const string Abandon = "abandon";
     public const string ListObjects = "list_objects";
     public const string DescribeObject = "describe_object";
+    public const string ScriptDatabase = "script_database";
 }
 
 /// <summary>
@@ -82,7 +83,7 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             ToolNames.ListObjects,
             database,
             filter.Describe(),
-            (reader, connectionString, limits, token) => reader.ListAsync(connectionString, filter, limits, token),
+            (engine, db, token) => engine.CatalogReader.ListAsync(db.Entry.ConnectionString!, filter, db.Limits, token),
             list => ToolResult.Ok(ObjectListResponse.From(list)),
             cancellationToken);
     }
@@ -98,24 +99,89 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             ToolNames.DescribeObject,
             database,
             [parsed.ToString()],
-            (reader, connectionString, limits, token) => reader.DescribeAsync(connectionString, parsed, limits, token),
+            (engine, db, token) => engine.CatalogReader.DescribeAsync(db.Entry.ConnectionString!, parsed, db.Limits, token),
             details => ToolResult.Ok(ObjectDetailsResponse.From(details)),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Scripts the whole database when <paramref name="objects"/> is left out, or the objects named. An empty list is
+    /// refused rather than read as "everything" (Emmz's call, 2026-10-28). Every name is parsed here and resolved by
+    /// the scripter before any file is created.
+    /// </summary>
+    public Task<ToolResult> ScriptDatabaseAsync(string database, IReadOnlyList<string>? objects, CancellationToken cancellationToken)
+    {
+        List<ObjectName>? names = null;
+        if (objects is { Count: 0 })
+        {
+            return Task.FromResult(ToolResult.Error("objects is empty. Name at least one object, or leave objects out to script the whole database."));
+        }
+
+        if (objects is not null)
+        {
+            names = [];
+            foreach (var text in objects)
+            {
+                if (!ObjectName.TryParse(text, out var parsed, out var error))
+                {
+                    return Task.FromResult(ToolResult.Error(error));
+                }
+
+                names.Add(parsed);
+            }
+        }
+
+        return RunIntrospectionAsync(
+            ToolNames.ScriptDatabase,
+            database,
+            names?.Select(n => n.ToString()).ToList() ?? [],
+            (engine, db, token) => DatabaseScripter.ScriptAsync(
+                engine.CatalogReader,
+                engine.ScriptGenerator,
+                db.Entry.ConnectionString!,
+                names,
+                new ScriptTarget(session.ProjectDirectory, session.ScriptsFallbackDirectory, db.Identifier, session.Version, session.Time),
+                db.Limits,
+                token),
+            script => ToolResult.Ok(ScriptResponse.From(script)),
+            cancellationToken,
+            (script, auditEvent) => auditEvent with { ScriptPath = script.Path, Counts = script.Counts, OmittedCount = script.Omitted.Count },
+            script => DeleteUnlogged(script.Path, session.Diagnostics));
+    }
+
+    /// <summary>
+    /// Deletes a script whose audit event couldn't be written. If that fails too, the agent still isn't told the path,
+    /// and <paramref name="diagnostics"/> (the server's stderr) names it so a person can remove it (Emmz's call, 2026-10-28).
+    /// </summary>
+    internal static void DeleteUnlogged(string path, TextWriter diagnostics)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            diagnostics.WriteLine($"sql-mcp: a script was written but its audit event wasn't, and the script couldn't be deleted. Delete {path} by hand. {ex.Message}");
+        }
     }
 
     /// <summary>
     /// The flow every introspection tool shares, in the order <see cref="RunAsync"/> uses (design I7):
     /// <c>audit ok? → resolve db → introspection allowed? → available? → read → audit → respond</c>. There's no
     /// classifier step: the reader runs fixed catalog queries, never the agent's SQL. A call that reads the catalog
-    /// is logged as one <c>introspection</c> event, succeeded or not.
+    /// is logged as one <c>introspection</c> event, succeeded or not. <paramref name="describe"/> adds a success's
+    /// details to its event; if that event can't be logged, <paramref name="discard"/> undoes what the call left
+    /// behind (a script file), so nothing is handed out unlogged.
     /// </summary>
     private async Task<ToolResult> RunIntrospectionAsync<T>(
         string tool,
         string database,
         IReadOnlyList<string> request,
-        Func<ICatalogReader, string, EffectiveLimits, CancellationToken, Task<CatalogOutcome<T>>> read,
+        Func<EngineServices, EffectiveDatabase, CancellationToken, Task<CatalogOutcome<T>>> read,
         Func<T, ToolResult> respond,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<T, IntrospectionEvent, IntrospectionEvent>? describe = null,
+        Action<T>? discard = null)
     {
         if (Refusal() is { } refusal)
         {
@@ -139,12 +205,12 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             return ToolResult.Error($"{db.Identifier} is unavailable: {db.Entry.UnavailableReason}");
         }
 
-        var reader = session.Engines[db.Entry.Engine].CatalogReader;
+        var engine = session.Engines[db.Entry.Engine];
         CatalogOutcome<T> outcome;
         var started = Stopwatch.GetTimestamp();
         try
         {
-            outcome = await read(reader, db.Entry.ConnectionString!, db.Limits, cancellationToken).ConfigureAwait(false);
+            outcome = await read(engine, db, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -157,11 +223,20 @@ internal sealed class ToolPipeline(SqlMcpSession session)
             return Audited(Failed(FailureKind.Other, null), ToolResult.Error($"{tool} failed: {ex.Message}"));
         }
 
+        if (outcome is CatalogSucceeded<T> succeeded)
+        {
+            var succeededEvent = new IntrospectionEvent(tool, db.Identifier, request, (long)succeeded.Duration.TotalMilliseconds, Succeeded: true);
+            if (session.Audit.Write(describe?.Invoke(succeeded.Value, succeededEvent) ?? succeededEvent))
+            {
+                return respond(succeeded.Value);
+            }
+
+            discard?.Invoke(succeeded.Value);
+            return Unavailable;
+        }
+
         return outcome switch
         {
-            CatalogSucceeded<T> succeeded => Audited(
-                new IntrospectionEvent(tool, db.Identifier, request, (long)succeeded.Duration.TotalMilliseconds, Succeeded: true),
-                respond(succeeded.Value)),
             CatalogFailed<T> failed => Audited(
                 new IntrospectionEvent(tool, db.Identifier, request, (long)failed.Duration.TotalMilliseconds, Succeeded: false)
                 {

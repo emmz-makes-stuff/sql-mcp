@@ -38,14 +38,18 @@ internal static class InitCommand
             writer.Write(ConfigContent);
         }
 
-        var createdGitIgnore = ProjectLayout.EnsureGitIgnore(directory);
+        var gitIgnore = ProjectLayout.EnsureGitIgnoreLines(directory);
 
         output.WriteLine(configExists
             ? $"{paths.ProjectConfig} already exists. It was left unchanged."
             : $"Created {paths.ProjectConfig}.");
-        if (createdGitIgnore)
+        if (gitIgnore.Created)
         {
-            output.WriteLine($"Created {Path.Combine(directory, ".gitignore")}.");
+            output.WriteLine($"Created {gitIgnore.Path}.");
+        }
+        else if (gitIgnore.Added.Count > 0)
+        {
+            output.WriteLine($"Added {string.Join(" and ", gitIgnore.Added)} to {gitIgnore.Path}.");
         }
 
         if (!configExists)

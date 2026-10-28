@@ -37,15 +37,15 @@
 
 ## 5. script_database tool, files and init
 
-- [ ] 5.1 Add `ScriptFiles` (design I6):
+- [x] 5.1 Add `ScriptFiles` (design I6):
   - the project or fallback `scripts` directory;
   - the safe file name `<id>-<yyyyMMddTHHmmssZ>.sql`, with `-2`, `-3` and so on on a collision;
   - a `.sql.tmp` written then moved with no overwrite, and the temp file deleted on failure;
   - the header comment (identifier, server version, UTC time, sql-mcp version).
 
   Verify with unit tests for "Script file name", a collision, a failed write leaving no file, and a header holding no connection-string fragment
-- [ ] 5.2 Replace `EnsureGitIgnore` with `EnsureGitIgnoreLines("logs/", "scripts/")`, which adds the missing lines and keeps the others. Use it from `init`, from the audit log's directory creation, and before writing a script. Verify with unit tests for a missing file, a `logs/`-only file ("Project initialised before this change"), and a file with extra user lines, plus the updated `init` "Fresh project" command test
-- [ ] 5.3 Add the `script_database` tool through `RunIntrospectionAsync`:
+- [x] 5.2 Replace `EnsureGitIgnore` with `EnsureGitIgnoreLines("logs/", "scripts/")`, which adds the missing lines and keeps the others. Use it from `init`, from the audit log's directory creation, and before writing a script. Verify with unit tests for a missing file, a `logs/`-only file ("Project initialised before this change"), and a file with extra user lines, plus the updated `init` "Fresh project" command test
+- [x] 5.3 Add the `script_database` tool through `RunIntrospectionAsync`:
   - names are resolved before anything is written;
   - the response is `{path, bytes, counts, omitted}`, without the script text;
   - the audit event records the path, the counts and the omitted count, and if the audit write fails the file is deleted;
@@ -53,8 +53,8 @@
   - it is annotated read-only (Emmz's decision, 2026-10-26).
 
   Verify with pipeline tests for "Script denied", "Unknown name in the list", "Result", "Script call", and the audit-failure deletion
-- [ ] 5.4 Add the round-trip integration test: script the seeded database, create an empty database in the same container, run the script there (split on `GO`), then compare `list_objects` and `describe_object` for every object, leaving out row counts and the omitted objects. Verify that `make itest` passes with "Script rebuilds the schema", "Encrypted procedure", "Database users" and "Failed script leaves no file" (cancelled part way through) covered
-- [ ] 5.5 Update the README: replace "Introspection tools come in a later release" with a section on the three tools, the scripts directory, and what is omitted. Note SMO as now used in `docs/dependencies.md`. Verify that the README's sample config test still passes and `make gates` is green
+- [x] 5.4 Add the round-trip integration test: script the seeded database, create an empty database in the same container, run the script there (split on `GO`), then compare `list_objects` and `describe_object` for every object, leaving out row counts and the omitted objects. Verify that `make itest` passes with "Script rebuilds the schema", "Encrypted procedure", "Database users" and "Failed script leaves no file" (cancelled part way through) covered
+- [x] 5.5 Update the README: replace "Introspection tools come in a later release" with a section on the three tools, the scripts directory, and what is omitted. Note SMO as now used in `docs/dependencies.md`. Verify that the README's sample config test still passes and `make gates` is green
 
 ## Workflow follow-up
 

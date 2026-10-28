@@ -65,7 +65,7 @@ Every command exits 0 on success and 1 on failure, with errors on stderr. Only `
 | Command | What it does |
 |---|---|
 | `sql-mcp serve [--project <dir>]` | Runs the MCP server over stdio. MCP clients start this; you don't run it yourself. Reads config from `<dir>` (default: the current directory). |
-| `sql-mcp init` | Creates `.sql-mcp/config.json` (no databases, with a `$schema` reference) and `.sql-mcp/.gitignore` (ignoring `logs/`). Never overwrites an existing config. |
+| `sql-mcp init` | Creates `.sql-mcp/config.json` (no databases, with a `$schema` reference) and `.sql-mcp/.gitignore` (ignoring `logs/` and `scripts/`). Never overwrites an existing config, and only adds missing lines to an existing `.gitignore`. |
 | `sql-mcp db add '<connection string>' [--user]` | Adds a database and prints its identifier (`host:port/database`). Refuses a literal password in the project config, which is usually committed: use `Password=${env:NAME}`, or `--user`. |
 | `sql-mcp db remove <id> [--user]` | Removes a database. |
 | `sql-mcp allow <group> [--db <id>] [--user]` | Allows a tool group for every database in the file, or for one with `--db`. Takes the group off the deny list at the same level. |
@@ -75,7 +75,7 @@ Every command exits 0 on success and 1 on failure, with errors on stderr. Only `
 | `sql-mcp register <client> [--scope user\|project] [--launcher tool\|dnx] [--force]` | Adds sql-mcp as an MCP server to `claude`, `codex`, `gemini` or `opencode`. Scope defaults to `user`. If the client can't be updated, it prints the config to add by hand. |
 
 The tool groups are `query`, `introspection`, `command` (INSERT, UPDATE, DELETE, MERGE), `ddl` and `execute`. By
-default only `query` and `introspection` are allowed. Introspection tools come in a later release.
+default only `query` and `introspection` are allowed.
 
 Edits go to the project's `.sql-mcp/config.json`, or with `--user` to the user config. They keep comments and
 formatting, and are checked against the schema before anything is written.
@@ -98,6 +98,9 @@ database. Every call checks the permission again for the database it names.
 | `ddl` | Tables, columns, constraints, indexes, views, schemas and sequences, and `TRUNCATE TABLE`. |
 | `execute` | `EXEC` of an existing user procedure, with literal or `NULL` parameter values. |
 | `next_page`, `abandon` | Read on through, or release, a paged result from `query`, `command` or `execute`. |
+| `list_objects` | Lists a database's tables, views, procedures, functions, triggers, sequences, synonyms, types and table types, filtered by schema, type and name pattern. Capped at the row cap. |
+| `describe_object` | One object's details: columns, keys, constraints, indexes, triggers and foreign keys for a table; definition and parameters for a view or routine. |
+| `script_database` | Writes a T-SQL script that creates the schema, with no data, to a file, and returns its path. |
 
 Every statement in a batch must belong to the tool's group. Otherwise nothing is sent, and the refusal names the
 tool that would run it, or says that tool is denied on this database.
@@ -137,6 +140,31 @@ What each write group accepts:
 > rolls back, it holds locks and grows the transaction log. The rollback isn't bounded by the timeout and can take
 > as long again. On a shared database, that is an outage even though nothing is lost. The tool descriptions tell
 > the agent to count matching rows with `query` first.
+
+**Introspection** (`list_objects`, `describe_object` and `script_database`) runs fixed catalog queries, never the
+agent's SQL, and changes nothing in the database, so all three are marked read-only to the client. They see only
+what the database login can see: a login without `VIEW DEFINITION` gets less.
+
+`script_database` writes the script to a new file and returns its path, size, the number of objects scripted by
+type, and the objects it left out. The script text never goes through the MCP response or the audit log.
+
+- **Where:** `.sql-mcp/scripts/` in the project, or `~/.local/state/sql-mcp/scripts/` (`%LOCALAPPDATA%\sql-mcp\scripts`
+  on Windows) when the project has no `.sql-mcp/`. The file is named from the database identifier and the UTC
+  time, such as `localhost_1433_app-20261026T140509Z.sql`, and never overwrites another. sql-mcp adds `scripts/`
+  to `.sql-mcp/.gitignore` before it writes there. Old scripts aren't cleaned up: delete the folder when you like.
+- **What:** a comment header (database, server version, time, sql-mcp version; never the connection string), then
+  the schema in dependency order, with batches separated by `GO` lines. There's no data and no `CREATE DATABASE`:
+  run it in an existing, empty database.
+- **Chosen objects:** given a list of names, it scripts only those objects, with their own keys, indexes and
+  triggers, and not the objects they depend on. If any name isn't found, no file is written. Its omitted list
+  covers only the objects named: an encrypted trigger on a chosen table is left out without being listed.
+- **What is omitted:** for a whole database, everything the catalog holds is either scripted or listed as omitted,
+  with the reason: users, roles, application roles and permissions (security principals); certificates, keys and
+  database-scoped credentials (security objects); encrypted definitions; and anything else the generator doesn't
+  script.
+- **Differences after a round trip:** SQL Server names a table type's constraints itself, so they get new names. A
+  DML trigger's `CREATE TRIGGER … AS` header is rewritten bracketed and schema-qualified, and its body is kept as
+  written.
 
 ## Configuration
 

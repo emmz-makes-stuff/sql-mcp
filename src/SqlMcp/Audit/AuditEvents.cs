@@ -77,7 +77,8 @@ internal sealed record FailedEvent(
 /// An introspection call that ran (introspection design I7). <see cref="Request"/> is what was asked for: the
 /// filters as <c>name=value</c> entries, or object names. Never the objects, columns or definitions returned.
 /// A failure keeps only its kind and error number, as <see cref="FailedEvent"/> does, because the message text can
-/// echo values.
+/// echo values. A script adds where it was written, how many objects of each type it holds, and how many it omitted,
+/// never the script text.
 /// </summary>
 internal sealed record IntrospectionEvent(
     string Tool,
@@ -89,4 +90,11 @@ internal sealed record IntrospectionEvent(
     public FailureKind? Kind { get; init; }
 
     public int? ErrorNumber { get; init; }
+
+    public string? ScriptPath { get; init; }
+
+    /// <summary>Scripted objects by type wire name, such as <c>table</c>.</summary>
+    public IReadOnlyDictionary<string, int>? Counts { get; init; }
+
+    public int? OmittedCount { get; init; }
 }
