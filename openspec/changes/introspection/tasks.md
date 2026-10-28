@@ -79,6 +79,19 @@
 - [x] 8.3 For chosen objects, build the narrowed inventory from what resolution returns (with encryption and the chosen tables' triggers), instead of running the whole-database inventory. Verify with the §7.5 tests and a pipeline test asserting that `InventoryAsync` isn't called for chosen objects, and that `make gates` is green
 - [x] 8.4 Make `script_database`'s `objects` items schema `anyOf: [string, {name, type?}]` instead of `oneOf`, and drop `additionalProperties: false` from it. `ParseObjectsEntry` still refuses extra keys. Both changes are for model APIs with partial JSON Schema support, Gemini especially (Emmz, 2026-10-28). Update the human-verification line to match. Verify with the updated `ToolCatalogTests` schema test, and that `make gates` is green
 
+## 9. Review fixes: chosen triggers and messages (code-review of §7–§8, 2026-10-28)
+
+- [ ] 9.1 Script a trigger once when both it and its table or view are chosen: remove duplicate URNs from the generator's trigger list, as `Walk` does for walked candidates. Verify with a generator itest naming `dbo.orders` and `dbo.orders_status` (one `CREATE TRIGGER`, one scripted item), and a round trip of that script
+- [ ] 9.2 A chosen DML trigger on an encrypted view is left out, as it is in a whole-database script: resolution gives the trigger's parent with its encryption, the generator skips it, and the omitted list names it `on an encrypted view`. Verify with a generator itest
+- [ ] 9.3 A DML trigger whose table or view resolution can't name (a parent outside the catalog query, such as one marked `is_ms_shipped`) fails with a message that says so, not "was not found when scripting began". Verify with a unit-level generator test using a parentless trigger summary
+- [ ] 9.4 When the candidates for an ambiguous name include an object and a type with the same name in one schema, the message also says to give `type`, even when other schemas match too. Verify with a `NameResolution` unit test (mixed schemas, plus a table and a table type in one schema)
+
+## 10. Review fixes: batch resolution and types (code-review of §7–§8, 2026-10-28)
+
+- [ ] 10.1 Resolve every name in one query: pass the names as a delimited list (no OPENJSON, which needs compatibility level 130), return each candidate tagged with its name's position, and keep `NameResolution.Problem` per name. Verify that the resolve, describe and compatibility-level itests pass unchanged, with a new itest resolving many names, among them duplicates and an ambiguous one
+- [ ] 10.2 Hold a DML trigger's parent kind as an `ObjectType`, not a wire-name string, so the generator's table-or-view switch is checked by the compiler. Verify with the generator tests
+- [ ] 10.3 Make `IntrospectionCall<T>` a ready/refused pair, so a call with neither a read nor an error can't be built, and drop `call.Error!`. Verify with the introspection pipeline tests and `make gates`
+
 ## Workflow follow-up
 
 - Whole-change self-review, the change-done devlog note, and an offer of `code-review` before archiving.
