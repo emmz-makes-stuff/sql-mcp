@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Describing tables and views
-For a table or view, `describe_object` SHALL return its columns in order, each with its name, SQL type, nullability, default, and whether it is an identity or computed column (with the expression). A column's default SHALL be given as its expression and, separately, the name of its default constraint, including a name SQL Server generated. For a table it SHALL also return the primary key, unique and check constraints, indexes, triggers, the foreign keys it declares and the foreign keys that reference it.
+For a table or view, `describe_object` SHALL return its columns in order, each with its name, SQL type, nullability, default, and whether it is an identity or computed column (with the expression). A default SHALL also give its constraint's name, even one SQL Server generated. For a table it SHALL also return the primary key, unique and check constraints, indexes, triggers, the foreign keys it declares and the foreign keys that reference it.
 
 #### Scenario: Table with keys
 - **WHEN** an agent describes `dbo.orders`, which has an identity primary key, a foreign key to `dbo.users`, and is referenced by `dbo.order_lines`
